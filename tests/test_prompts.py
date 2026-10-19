@@ -24,25 +24,20 @@ def _positions(text: str, names: list[str]) -> list[int]:
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 2
+    assert prompt_service.chain_version == 3
     assert all(ref.version.startswith("v") for ref in prompt_service.modules)
 
 
-def test_qq_chain_includes_qq_module() -> None:
-    text = prompt_service.get_system_prompt(platform="qq")
-    names = [*BASE_ORDER, "platform-qq", "style"]
+def test_chain_order_includes_platform_module() -> None:
+    text = prompt_service.get_system_prompt()
+    names = [*BASE_ORDER, "platform", "style"]
     assert _positions(text, names) == sorted(_positions(text, names))
     assert _marker("multimodal") not in text
 
 
 def test_multimodal_included_when_requested() -> None:
-    text = prompt_service.get_system_prompt(platform="qq", include_multimodal=True)
+    text = prompt_service.get_system_prompt(include_multimodal=True)
     assert _marker("multimodal") in text
-
-
-def test_unknown_platform_raises() -> None:
-    with pytest.raises(PromptChainError):
-        prompt_service.get_system_prompt(platform="telegram")
 
 
 def test_group_prompt_is_separate() -> None:

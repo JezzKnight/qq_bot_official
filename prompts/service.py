@@ -87,9 +87,9 @@ class PromptService:
             version = str(spec.get("version") or version)
 
             when = spec.get("when")
-            if when is not None and when not in {"onebot", "qq", "multimodal"}:
+            if when is not None and when != "multimodal":
                 raise PromptChainError(  # noqa: TRY003
-                    f"{chain_file} 的 when 只支持 onebot/qq/multimodal: {when!r}"
+                    f"{chain_file} 的 when 只支持 multimodal: {when!r}"
                 )
 
             # 只允许 chat/ 下的单层文件名，避免 ../ 之类的路径穿越
@@ -112,26 +112,16 @@ class PromptService:
         return raw, ""
 
     def get_system_prompt(
-        self,
-        *,
-        platform: str = "qq",
-        include_multimodal: bool = False,
-        **variables: str,
+        self, *, include_multimodal: bool = False, **variables: str
     ) -> str:
-        """按链路顺序拼装系统提示词。
+        """按链路顺序拼装系统提示词（QQ 专用）。
 
-        platform 决定加载哪个平台专属模块（onebot/qq）；include_multimodal
-        决定是否追加 multimodal 模块（普通文本模型跳过，保持前缀稳定）。
+        include_multimodal 决定是否追加 multimodal 模块：普通文本模型跳过，
+        保持提示词前缀稳定以命中缓存。
         """
-        if platform not in {"onebot", "qq"}:
-            raise PromptChainError(f"未知平台: {platform!r}")  # noqa: TRY003
-
         parts: list[str] = []
         for ref in self._modules:
-            if ref.when == "multimodal":
-                if not include_multimodal:
-                    continue
-            elif ref.when is not None and ref.when != platform:
+            if ref.when == "multimodal" and not include_multimodal:
                 continue
             content = self._loader.load(ref.file)
             if content.strip():

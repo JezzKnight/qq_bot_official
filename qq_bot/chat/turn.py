@@ -158,7 +158,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
                 logger.debug("成员名片刷新失败", exc_info=True)
 
     system_part = prompt_service.get_system_prompt(
-        platform=incoming.platform, include_multimodal=include_media
+        include_multimodal=include_media
     )
     if is_group:
         member_info = await members_xml(memory, gid) if memory is not None else None
