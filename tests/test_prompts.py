@@ -62,15 +62,5 @@ def test_path_traversal_rejected(tmp_path: Path) -> None:
         PromptService(PromptLoader(tmp_path), PromptRenderer())
 
 
-def test_invalid_when_rejected(tmp_path: Path) -> None:
-    (tmp_path / "chat").mkdir()
-    (tmp_path / "chat" / "chain.yaml").write_text(
-        "modules:\n  - name: persona\n    when: telegram\n", encoding="utf-8"
-    )
-    (tmp_path / "chat" / "persona.md").write_text("x", encoding="utf-8")
-    with pytest.raises(PromptChainError):
-        PromptService(PromptLoader(tmp_path), PromptRenderer())
-
-
 def test_renderer_substitutes_variables() -> None:
     assert PromptRenderer().render("a {{ x }}", x="b") == "a b"

@@ -11,7 +11,6 @@ from nonebot import get_driver, get_plugin_config, on_message
 from nonebot.adapters.qq import (
     Bot,
     C2CMessageCreateEvent,
-    GroupAtMessageCreateEvent,
     GroupMessageCreateEvent,
     MessageSegment,
 )
@@ -96,9 +95,7 @@ c2c_matcher = on_message(rule=Rule(_is_c2c), priority=10, block=True)
 
 
 async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
-    logger.info("DISPATCH start type=%s", type(event).__name__)
     incoming = qq_from_event(event, reply=QQReply(bot, event))
-    logger.info("DISPATCH incoming text=%r images=%s", incoming.text, len(incoming.images))
     if not incoming.text and not incoming.images:
         await bot.send(event, MessageSegment.text("你发了个空消息 我没看懂"))
         return
@@ -117,13 +114,6 @@ async def _record_full_message(bot: Bot, event: QQMessageEvent) -> None:
     if getattr(author, "bot", False):
         return
     incoming = qq_from_event(event, reply=QQReply(bot, event))
-    # 临时诊断：确认全量消息里 @ 机器人时 mentions 到底长什么样
-    logger.info(
-        "GROUP_MESSAGE mentions=%r to_me=%r text=%r",
-        getattr(event, "mentions", None),
-        getattr(event, "to_me", None),
-        incoming.text,
-    )
     if not incoming.text and not incoming.images:
         return
     repo = await get_memory()
@@ -181,7 +171,6 @@ async def handle_cmd(bot: Bot, event: QQMessageEvent) -> None:
 
 @group_matcher.handle()
 async def handle_group_at(bot: Bot, event: QQMessageEvent) -> None:
-    logger.info("GROUP_AT handler start type=%s", type(event).__name__)
     await _dispatch(bot, event)
 
 

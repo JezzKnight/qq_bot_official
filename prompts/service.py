@@ -25,15 +25,11 @@ class PromptChainError(Exception):
 
 @dataclass(frozen=True)
 class ModuleRef:
-    """链路里的一个模块：name 对应 chat/{name}.md，version 仅作标记。
-
-    when: 条件加载（None=始终；onebot/qq=按平台；multimodal=按模型能力）。
-    """
+    """链路里的一个模块：name 对应 chat/{name}.md，version 仅作标记。"""
 
     name: str
     version: str
     file: str
-    when: str | None = None
 
 
 class PromptService:
@@ -71,36 +67,18 @@ class PromptService:
 
         refs: list[ModuleRef] = []
         for raw in raw_modules:
-            if isinstance(raw, str):
-                spec: dict[str, Any] = {"name": raw}
-            elif isinstance(raw, dict):
-                spec = raw
-            else:
+            if not isinstance(raw, str) or not raw.strip():
                 raise PromptChainError(  # noqa: TRY003
-                    f"{chain_file} 的 modules 条目必须是字符串或对象: {raw!r}"
+                    f"{chain_file} 的 modules 条目必须是非空字符串: {raw!r}"
                 )
-
-            raw_name = spec.get("name")
-            if not isinstance(raw_name, str) or not raw_name.strip():
-                raise PromptChainError(f"{chain_file} 的模块缺少 name: {raw!r}")  # noqa: TRY003
-            name, version = self._parse_ref(raw_name.strip())
-            version = str(spec.get("version") or version)
-
-            when = spec.get("when")
-            if when is not None and when != "multimodal":
-                raise PromptChainError(  # noqa: TRY003
-                    f"{chain_file} 的 when 只支持 multimodal: {when!r}"
-                )
-
+            name, version = self._parse_ref(raw.strip())
             # 只允许 chat/ 下的单层文件名，避免 ../ 之类的路径穿越
             if not name or Path(name).name != name:
                 raise PromptChainError(f"非法的模块名: {raw!r}")  # noqa: TRY003
             file = f"chat/{name}.md"
             if not (self._loader.base_dir / file).is_file():
-                raise PromptChainError(f"模块 {raw!r} 对应的文件不存在: {file}")  # noqa: TRY003
-            refs.append(
-                ModuleRef(name=name, version=version, file=file, when=when)
-            )
+                raise PromptChainError(f"模块 {raw} 对应的文件不存在: {file}")  # noqa: TRY003
+            refs.append(ModuleRef(name=name, version=version, file=file))
         return data.get("version", 1), tuple(refs)
 
     @staticmethod
@@ -121,7 +99,7 @@ class PromptService:
         """
         parts: list[str] = []
         for ref in self._modules:
-            if ref.when == "multimodal" and not include_multimodal:
+            if ref.name == "multimodal" and not include_multimodal:
                 continue
             content = self._loader.load(ref.file)
             if content.strip():
