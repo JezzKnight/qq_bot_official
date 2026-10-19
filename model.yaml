@@ -11,7 +11,7 @@
 #   params        可选：temperature / max_tokens / timeout / connect_timeout
 # ─────────────────────────────────────────────────────────────
 
-default_model: glm-5.3-flash
+default_model: deepseek-v4-flash
 
 defaults:
   temperature: 1.0
