@@ -11,7 +11,7 @@ from prompts.renderer import PromptRenderer
 from prompts.service import PromptChainError, PromptService, prompt_service
 
 CHAT_DIR = Path("prompts/chat")
-BASE_ORDER = ["persona", "constraints", "guidelines", "capabilities"]
+BASE_ORDER = ["persona", "social", "constraints", "platform", "multimodal"]
 
 
 def _marker(name: str) -> str:
@@ -24,18 +24,18 @@ def _positions(text: str, names: list[str]) -> list[int]:
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 3
+    assert prompt_service.chain_version == 4
     assert all(ref.version.startswith("v") for ref in prompt_service.modules)
 
 
 def test_chain_order_includes_all_modules() -> None:
     text = prompt_service.get_system_prompt()
-    names = [*BASE_ORDER, "platform", "style", "multimodal"]
+    names = [*BASE_ORDER, "style"]
     assert _positions(text, names) == sorted(_positions(text, names))
 
 
 def test_group_prompt_is_separate() -> None:
-    assert "多用户身份规则" in prompt_service.get_group_prompt(member_info="x")
+    assert "群聊身份" in prompt_service.get_group_prompt(member_info="x")
 
 
 def test_missing_module_raises(tmp_path: Path) -> None:

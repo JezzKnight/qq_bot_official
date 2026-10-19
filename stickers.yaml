@@ -34,5 +34,5 @@ stickers:
 
   - file: ee.gif
     name: 想吃
-    tags: [食物, 馋, 想吃]
+    tags: [食物, 馋, 想吃, ee]
     description: 和用户讨论食物、bot 表达想吃时使用。
