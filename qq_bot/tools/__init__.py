@@ -19,6 +19,7 @@ from .save_glossary import save_glossary
 from .save_memory import save_memory
 from .search_agent_tool import search_agent
 from .send_sticker import send_sticker
+from .set_my_name import set_my_name
 from .web_fetch import web_fetch_by_tavily
 from .web_search import web_search_by_tavily
 
@@ -43,6 +44,7 @@ __all__ = [
     "save_memory",
     "search_agent",
     "send_sticker",
+    "set_my_name",
     "web_fetch_by_tavily",
     "web_search_by_tavily",
 ]

@@ -132,7 +132,7 @@ async def resolve_mentions(  # noqa: C901 —— 匹配规则集中在此，拆�
     *,
     group_id: str,
     text: str,
-    exclude_uids: set[int] | None = None,
+    exclude_uids: set[str] | None = None,
 ) -> tuple[list[ResolvedMention], list[str]]:
     """解析文本中出现的称呼 → 成员。返回 (命中列表, 歧义别名列表)。
 
