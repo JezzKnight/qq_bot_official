@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import random
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import logging
-
 import httpx
 
 logger = logging.getLogger(__name__)
+_HTTP_OK = 200
 
 ALLOWED_MODES = {
     "",
@@ -61,7 +61,7 @@ async def _get_access_token(proxy: str, refresh_tokens: list[str]) -> str:
                 headers={"User-Agent": _HEADERS["User-Agent"]},
                 data=data,
             )
-            if resp.status_code != 200:
+            if resp.status_code != _HTTP_OK:
                 logger.warning(
                     "Pixiv OAuth HTTP %s: %s",
                     resp.status_code,
@@ -71,7 +71,7 @@ async def _get_access_token(proxy: str, refresh_tokens: list[str]) -> str:
             token = resp.json().get("access_token") or ""
             if not token:
                 logger.warning("Pixiv OAuth 响应没有 access_token")
-            return token
+            return token  # noqa: TRY300
         except Exception as exc:  # noqa: BLE001 —— 网络失败按空 token 处理
             logger.warning(
                 "Pixiv OAuth 请求异常（检查 PROXY）: %s: %s",
@@ -92,7 +92,7 @@ async def _get_rank_info(access_token: str, mode: str, proxy: str) -> list[dict]
                 headers=headers,
                 params={"mode": mode},
             )
-            if resp.status_code != 200:
+            if resp.status_code != _HTTP_OK:
                 logger.warning(
                     "Pixiv ranking mode=%s HTTP %s: %s",
                     mode,
