@@ -132,7 +132,8 @@ async def _pixiv(event: Any, reply: QQReply, arg: str) -> None:
 
     await reply.passive(f"找到 {len(result)} 张")
     for img in result:
-        await reply.image(img)
+        if not await reply.image(img):
+            break
 
 
 async def _whoami(event: Any, reply: QQReply, repo: Any) -> None:
