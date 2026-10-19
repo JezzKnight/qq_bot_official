@@ -19,7 +19,6 @@ from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
 from qq_bot.chat.turn import run_turn
-from qq_bot.platform.identity import resolve_group, resolve_user
 from qq_bot.platform.qqbot.incoming import (
     from_event as qq_from_event,
 )
@@ -119,15 +118,8 @@ async def _record_full_message(bot: Bot, event: QQMessageEvent) -> None:
     repo = await get_memory()
     if repo is None or incoming.group_key is None:
         return
-    uid = await resolve_user(
-        repo,
-        platform="qq",
-        external_id=incoming.user_key,
-        display_name=incoming.display_name,
-    )
-    gid = await resolve_group(
-        repo, platform="qq", external_id=incoming.group_key
-    )
+    uid = incoming.user_key
+    gid = incoming.group_key
     if incoming.display_name:
         try:
             await repo.refresh_member_name(

@@ -14,12 +14,12 @@ def _usage() -> SimpleNamespace:
 
 
 async def test_persist_writes_user_and_assistant(repo) -> None:
-    thread_id = await repo.ensure_thread("private", None, 3215481708)
+    thread_id = await repo.ensure_thread("private", None, "U3215481708")
     await persist_turn(
         repo,
         thread_id=thread_id,
         group_id=None,
-        sender_id=3215481708,
+        sender_id="U3215481708",
         sender_name="杨神",
         user_text="你好",
         assistant_text="早上好",
@@ -47,7 +47,7 @@ async def test_persist_skips_when_memory_missing() -> None:
         None,
         thread_id=None,
         group_id=None,
-        sender_id=1,
+        sender_id="U1",
         sender_name="x",
         user_text="a",
         assistant_text="b",

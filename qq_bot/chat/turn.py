@@ -22,7 +22,6 @@ from qq_bot.memory.assembler import ContextParts, build_context, trim_messages
 from qq_bot.memory.members import members_xml
 from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.memory.naming import escape_for_prompt
-from qq_bot.platform.identity import resolve_group, resolve_user
 from qq_bot.platform.reply import split_for_reply
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
@@ -102,19 +101,8 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
 
     if memory is None:
         return "记忆库暂时不可用 稍后再试"
-    uid = await resolve_user(
-        memory,
-        platform=incoming.platform,
-        external_id=incoming.user_key,
-        display_name=sender_name,
-    )
-    gid = (
-        await resolve_group(
-            memory, platform=incoming.platform, external_id=incoming.group_key
-        )
-        if incoming.group_key
-        else None
-    )
+    uid = incoming.user_key
+    gid = incoming.group_key
 
     scope = f"groups/{gid}/{uid}" if is_group else f"private/{uid}"
     current_scope.set(scope)

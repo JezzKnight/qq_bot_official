@@ -65,11 +65,11 @@ async def save_memory(key: str, mem_type: str, content: str, scope: str = "perso
     raw = current_scope.get() or ""
     parts = raw.split("/")
     if raw.startswith("groups/") and scope == "group":
-        scope_kind, scope_id = "group", int(parts[1])
+        scope_kind, scope_id = "group", parts[1]
     elif raw.startswith("groups/"):
-        scope_kind, scope_id = "user", int(parts[2])
+        scope_kind, scope_id = "user", parts[2]
     elif raw.startswith("private/"):
-        scope_kind, scope_id = "user", int(parts[1])
+        scope_kind, scope_id = "user", parts[1]
     else:
         return "无法确定当前会话，未保存"
 

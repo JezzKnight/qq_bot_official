@@ -1,6 +1,6 @@
 """QQ 官方事件 → Incoming。
 
-官方给的是 openid（字符串），身份映射在 platform/identity 中完成；
+官方给的是 openid（字符串），直接作为数据库主键使用；
 群成员列表接口只返回 openid、没有昵称，因此显示名优先用事件里的 username，
 缺失时退化为 openid 尾号。
 """

@@ -7,26 +7,26 @@ from qq_bot.memory.glossary import format_injection, match_terms
 
 async def test_upsert_then_update(repo) -> None:
     first = await repo.upsert_glossary_term(
-        group_id=100,
+        group_id="G100",
         term="我造密码",
         term_key="我造密码",
         definition="一种表达惊讶的口头禅",
     )
     assert first == "created"
     again = await repo.upsert_glossary_term(
-        group_id=100, term="我造密码", term_key="我造密码", definition="改后的释义"
+        group_id="G100", term="我造密码", term_key="我造密码", definition="改后的释义"
     )
     assert again == "updated"
-    rows = await repo.list_glossary(100)
+    rows = await repo.list_glossary("G100")
     assert len(rows) == 1
     assert rows[0]["definition"] == "改后的释义"
 
 
 async def test_terms_are_group_scoped(repo) -> None:
     await repo.upsert_glossary_term(
-        group_id=100, term="甲", term_key="甲", definition="A"
+        group_id="G100", term="甲", term_key="甲", definition="A"
     )
-    assert await repo.list_glossary(200) == []
+    assert await repo.list_glossary("G200") == []
 
 
 def test_match_chinese_substring() -> None:

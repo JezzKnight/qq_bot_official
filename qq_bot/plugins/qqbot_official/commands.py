@@ -14,7 +14,6 @@ from qq_bot.ai.model_registry import get_registry
 from qq_bot.chat.commands import parse_command
 from qq_bot.chat.pixiv import fetch_pixiv_images
 from qq_bot.chat.usage import format_usage, memory_stats_line
-from qq_bot.platform.identity import resolve_group, resolve_user
 from qq_bot.platform.qqbot.incoming import from_event as qq_from_event
 from qq_bot.services.client_factory import default_model_name
 from qq_bot.services.config import AiChatConfig
@@ -70,17 +69,8 @@ async def handle_command(event: Any, reply: QQReply, repo: Any) -> None:
 
 async def _reset(event: Any, reply: QQReply, repo: Any) -> None:
     incoming = qq_from_event(event, reply=reply)
-    uid = await resolve_user(
-        repo,
-        platform="qq",
-        external_id=incoming.user_key,
-        display_name=incoming.display_name,
-    )
-    gid = (
-        await resolve_group(repo, platform="qq", external_id=incoming.group_key)
-        if incoming.group_key
-        else None
-    )
+    uid = incoming.user_key
+    gid = incoming.group_key
     thread_id = await repo.ensure_thread(
         "group_member" if gid is not None else "private", gid, uid
     )
@@ -100,17 +90,8 @@ async def _usage(reply: QQReply, repo: Any) -> None:
 
 async def _model(event: Any, reply: QQReply, repo: Any, arg: str) -> None:
     incoming = qq_from_event(event, reply=reply)
-    uid = await resolve_user(
-        repo,
-        platform="qq",
-        external_id=incoming.user_key,
-        display_name=incoming.display_name,
-    )
-    gid = (
-        await resolve_group(repo, platform="qq", external_id=incoming.group_key)
-        if incoming.group_key
-        else None
-    )
+    uid = incoming.user_key
+    gid = incoming.group_key
     session_id = f"group_{gid}" if gid is not None else f"user_{uid}"
     names = get_registry().names()
     arg = arg.strip()
@@ -157,17 +138,8 @@ async def _pixiv(event: Any, reply: QQReply, arg: str) -> None:
 async def _whoami(event: Any, reply: QQReply, repo: Any) -> None:
     """展示机器人当前掌握的本人信息（openid 只显示尾号）。"""
     incoming = qq_from_event(event, reply=reply)
-    uid = await resolve_user(
-        repo,
-        platform="qq",
-        external_id=incoming.user_key,
-        display_name=incoming.display_name,
-    )
-    gid = (
-        await resolve_group(repo, platform="qq", external_id=incoming.group_key)
-        if incoming.group_key
-        else None
-    )
+    uid = incoming.user_key
+    gid = incoming.group_key
     preferred = await repo.preferred_name(uid)
     names = await repo.list_names(gid)
     mine = [n["name"] for n in names if n["user_id"] == uid]

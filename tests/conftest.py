@@ -54,7 +54,7 @@ async def db(pg_pool):
     async with pg_pool.acquire() as conn:
         await conn.execute(
             "TRUNCATE messages, threads, user_names, group_members, users, "
-            "group_summaries, memories, glossary_terms, stickers, identity_map "
+            "group_summaries, memories, glossary_terms, stickers "
             "RESTART IDENTITY CASCADE"
         )
 
@@ -68,6 +68,6 @@ async def repo(pg_pool):
     async with pg_pool.acquire() as conn:
         await conn.execute(
             "TRUNCATE messages, threads, user_names, group_members, users, "
-            "group_summaries, memories, glossary_terms, stickers, identity_map "
+            "group_summaries, memories, glossary_terms, stickers "
             "RESTART IDENTITY CASCADE"
         )

@@ -51,7 +51,7 @@ async def save_glossary(term: str, definition: str) -> str:
     if repo is None:
         return "记忆库暂时不可用，术语未保存"
     action = await repo.upsert_glossary_term(
-        group_id=int(scope.split("/")[1]),
+        group_id=scope.split("/")[1],
         term=clean,
         term_key=key,
         definition=definition.strip(),

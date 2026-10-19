@@ -42,11 +42,11 @@ async def set_my_name(name: str) -> str:
         return "记忆库暂时不可用，稍后再试"
 
     if scope.startswith("groups/"):
-        group_id: int | None = int(scope.split("/")[1])
-        user_id = int(scope.split("/")[2])
+        group_id: str | None = scope.split("/")[1]
+        user_id = scope.split("/")[2]
     elif scope.startswith("private/"):
         group_id = None
-        user_id = int(scope.split("/")[1])
+        user_id = scope.split("/")[1]
     else:
         return "无法确定当前会话，稍后再试"
 

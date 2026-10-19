@@ -35,14 +35,11 @@ async def recall_memory(target_uid: str) -> str:
     scope = current_scope.get() or ""
     if not scope.startswith("groups/"):
         return "该工具仅群聊可用"
-    gid = int(scope.split("/")[1])
+    gid = scope.split("/")[1]
     repo = await get_memory()
     if repo is None:
         return "记忆库暂时不可用"
-    try:
-        uid = int(target_uid)
-    except ValueError:
-        return f"target_uid 不是合法数字: {target_uid}"
+    uid = target_uid
 
     rows = await repo.list_memories(user_id=uid, group_id=gid)
     entries = [r for r in rows if r["scope_kind"] == "user"]

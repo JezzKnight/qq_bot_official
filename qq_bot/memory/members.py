@@ -8,15 +8,15 @@ from typing import Any
 from qq_bot.memory.naming import escape_for_prompt
 
 
-async def members_list(repo: Any, group_id: int) -> list[dict] | None:
+async def members_list(repo: Any, group_id: str) -> list[dict] | None:
     """从 PG 读群成员；无成员返回 None。"""
     if repo is None:
         return None
-    members = await repo.list_members(int(group_id))
+    members = await repo.list_members(group_id)
     return members or None
 
 
-async def members_xml(repo: Any, group_id: int) -> str | None:
+async def members_xml(repo: Any, group_id: str) -> str | None:
     """构造群成员 XML（带 call 属性 = 该成员的称呼）。"""
     members = await members_list(repo, group_id)
     if not members:

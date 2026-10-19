@@ -138,10 +138,10 @@ async def query_chat_history(date: str, limit: int = 200) -> str:
             return "❌ 记忆库暂时不可用"
         if parts[0] == "groups":
             rows = await memory.messages_by_date(
-                group_id=int(parts[1]), date_str=date_str, limit=limit
+                group_id=parts[1], date_str=date_str, limit=limit
             )
         else:
-            thread_id = await memory.ensure_thread("private", None, int(parts[1]))
+            thread_id = await memory.ensure_thread("private", None, parts[1])
             rows = await memory.messages_by_date(
                 thread_id=thread_id, date_str=date_str, limit=limit
             )

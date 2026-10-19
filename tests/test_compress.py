@@ -26,7 +26,7 @@ def _config(
 
 
 async def _seed(
-    repo, gid: int, uid: int, count: int, *, name: str = "小明"
+    repo, gid: str, uid: str, count: int, *, name: str = "小明"
 ) -> list[int]:
     tid = await repo.ensure_thread("group_member", gid, uid)
     ids = []
@@ -51,35 +51,47 @@ async def fake_summary(previous, messages, _max_tokens) -> str:
 
 
 async def test_below_threshold_does_nothing(repo) -> None:
-    await _seed(repo, 100, 7, 2)
-    assert await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3), summarize=fake_summary
-    ) is None
-    assert await repo.count_summaries(100) == 0
+    await _seed(repo, "G100", "U7", 2)
+    assert (
+        await compress_if_needed(
+            repo, group_id="G100", config=_config(trigger=3), summarize=fake_summary
+        )
+        is None
+    )
+    assert await repo.count_summaries("G100") == 0
 
 
 async def test_compress_covers_window_outside(repo) -> None:
-    ids = await _seed(repo, 100, 7, 5)
+    ids = await _seed(repo, "G100", "U7", 5)
     outcome = await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3, window=2), summarize=fake_summary
+        repo,
+        group_id="G100",
+        config=_config(trigger=3, window=2),
+        summarize=fake_summary,
     )
     assert outcome is not None
     # 窗口（最后 2 条）保留原文，压缩区间止于第 3 条
     assert outcome.covers_from == ids[0]
     assert outcome.covers_to == ids[2]
     assert outcome.messages == 3
-    assert await repo.count_summaries(100) == 1
+    assert await repo.count_summaries("G100") == 1
 
 
 async def test_second_batch_is_contiguous(repo) -> None:
-    await _seed(repo, 100, 7, 5)
+    await _seed(repo, "G100", "U7", 5)
     first = await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3, window=2), summarize=fake_summary
+        repo,
+        group_id="G100",
+        config=_config(trigger=3, window=2),
+        summarize=fake_summary,
     )
     assert first is not None
-    ids2 = await _seed(repo, 100, 7, 3)
+    ids2 = await _seed(repo, "G100", "U7", 3)
     outcome = await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3, window=2), summarize=fake_summary
+        repo,
+        group_id="G100",
+        config=_config(trigger=3, window=2),
+        summarize=fake_summary,
     )
     assert outcome is not None
     # 关键性质：第二批从第一批结束的下一条开始，不重叠；且窗口内最后 2 条不被覆盖
@@ -88,27 +100,37 @@ async def test_second_batch_is_contiguous(repo) -> None:
 
 
 async def test_idempotent_when_no_new_turns(repo) -> None:
-    await _seed(repo, 100, 7, 5)
+    await _seed(repo, "G100", "U7", 5)
     first = await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3, window=2), summarize=fake_summary
+        repo,
+        group_id="G100",
+        config=_config(trigger=3, window=2),
+        summarize=fake_summary,
     )
     assert first is not None
     again = await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3, window=2), summarize=fake_summary
+        repo,
+        group_id="G100",
+        config=_config(trigger=3, window=2),
+        summarize=fake_summary,
     )
     assert again is None
-    assert await repo.count_summaries(100) == 1
+    assert await repo.count_summaries("G100") == 1
 
 
 async def test_full_rebuild_after_threshold(repo) -> None:
-    await _seed(repo, 100, 7, 5)
+    await _seed(repo, "G100", "U7", 5)
     await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3, window=2, rebuild_every=1),
+        repo,
+        group_id="G100",
+        config=_config(trigger=3, window=2, rebuild_every=1),
         summarize=fake_summary,
     )
-    await _seed(repo, 100, 7, 3)
+    await _seed(repo, "G100", "U7", 3)
     outcome = await compress_if_needed(
-        repo, group_id=100, config=_config(trigger=3, window=2, rebuild_every=1),
+        repo,
+        group_id="G100",
+        config=_config(trigger=3, window=2, rebuild_every=1),
         summarize=fake_summary,
     )
     assert outcome is not None
@@ -117,14 +139,14 @@ async def test_full_rebuild_after_threshold(repo) -> None:
 
 
 async def test_concurrent_calls_produce_single_summary(repo) -> None:
-    await _seed(repo, 100, 7, 6)
+    await _seed(repo, "G100", "U7", 6)
     cfg = _config(trigger=3, window=2)
     results = await asyncio.gather(
-        compress_if_needed(repo, group_id=100, config=cfg, summarize=fake_summary),
-        compress_if_needed(repo, group_id=100, config=cfg, summarize=fake_summary),
+        compress_if_needed(repo, group_id="G100", config=cfg, summarize=fake_summary),
+        compress_if_needed(repo, group_id="G100", config=cfg, summarize=fake_summary),
     )
     assert sum(1 for r in results if r is not None) == 1
-    assert await repo.count_summaries(100) == 1
+    assert await repo.count_summaries("G100") == 1
 
 
 def test_format_transcript_strips_identity_and_labels_bot() -> None:

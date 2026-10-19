@@ -51,7 +51,7 @@ async def build_context(
     repo: PgRepository,
     *,
     thread_id: int,
-    group_id: int | None,
+    group_id: str | None,
     config: MemoryConfig,
 ) -> ContextParts:
     parts = ContextParts()

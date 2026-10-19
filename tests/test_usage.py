@@ -27,9 +27,9 @@ def test_turn_usage_reset_clears() -> None:
 
 
 async def test_usage_persisted_and_aggregated(repo) -> None:
-    tid = await repo.ensure_thread("group_member", 100, 7)
+    tid = await repo.ensure_thread("group_member", "G100", "U7")
     await repo.append(
-        thread_id=tid, group_id=100, sender_id=None, role="assistant",
+        thread_id=tid, group_id="G100", sender_id=None, role="assistant",
         content="回答", prompt_tokens=120, completion_tokens=30,
         cached_tokens=64, llm_calls=2, model="glm-test",
     )
@@ -43,18 +43,20 @@ async def test_usage_persisted_and_aggregated(repo) -> None:
 
 
 async def test_refresh_member_name_updates_cards(repo) -> None:
-    await repo.upsert_members(100, [{"user_id": 7, "card": "旧名", "nickname": "nick"}])
+    await repo.upsert_members(
+        "G100", [{"user_id": "U7", "card": "旧名", "nickname": "nick"}]
+    )
     changed = await repo.refresh_member_name(
-        group_id=100, user_id=7, card="新名", nickname="nick"
+        group_id="G100", user_id="U7", card="新名", nickname="nick"
     )
     assert changed is True
-    members = await repo.list_members(100)
+    members = await repo.list_members("G100")
     assert members[0]["card"] == "新名"
     # user_names 里旧名片应被替换
-    names = {r["name"] for r in await repo.list_names(100) if int(r["user_id"]) == 7}
+    names = {r["name"] for r in await repo.list_names("G100") if r["user_id"] == "U7"}
     assert "新名" in names and "旧名" not in names
 
     again = await repo.refresh_member_name(
-        group_id=100, user_id=7, card="新名", nickname="nick"
+        group_id="G100", user_id="U7", card="新名", nickname="nick"
     )
     assert again is False

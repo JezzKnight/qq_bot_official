@@ -77,7 +77,7 @@ def _occurrences(text: str, key: str) -> list[tuple[int, int]]:
 
 
 async def set_my_name(
-    repo: PgRepository, *, user_id: int, group_id: int | None, name: str
+    repo: PgRepository, *, user_id: str, group_id: str | None, name: str
 ) -> NameResult:
     """设置/清空本人称呼。撞别人的 preferred 或本群他人名片时拒绝（先到先得）。"""
     key = normalize(name)
@@ -96,7 +96,7 @@ async def set_my_name(
 
     if group_id is not None:
         for member in await repo.list_members(group_id):
-            if int(member["user_id"]) == user_id:
+            if str(member["user_id"]) == user_id:
                 continue
             for label in (member.get("card"), member.get("nickname")):
                 if label and normalize(label) == key:
@@ -130,7 +130,7 @@ def _select_uid(
 async def resolve_mentions(  # noqa: C901 —— 匹配规则集中在此，拆开反而难读
     repo: PgRepository,
     *,
-    group_id: int,
+    group_id: str,
     text: str,
     exclude_uids: set[int] | None = None,
 ) -> tuple[list[ResolvedMention], list[str]]:
@@ -149,9 +149,9 @@ async def resolve_mentions(  # noqa: C901 —— 匹配规则集中在此，拆�
         key = row["name_key"]
         if len(key) < _MIN_RESOLVE_LEN:
             continue
-        owners.setdefault(key, set()).add(int(row["user_id"]))
+        owners.setdefault(key, set()).add(str(row["user_id"]))
         if row["is_preferred"]:
-            preferred.setdefault(key, set()).add(int(row["user_id"]))
+            preferred.setdefault(key, set()).add(str(row["user_id"]))
 
     text_key = normalize(text)
     consumed = [False] * len(text_key)
@@ -183,7 +183,7 @@ async def resolve_mentions(  # noqa: C901 —— 匹配规则集中在此，拆�
 
 
 async def call_names(
-    repo: PgRepository, user_ids: list[int], group_id: int | None
+    repo: PgRepository, user_ids: list[str], group_id: str | None
 ) -> dict[int, str]:
     """给一批 uid 取"该怎么称呼"（weight 最小者：preferred > 别名 > 名片 > 昵称）。"""
     if not user_ids:
@@ -191,7 +191,7 @@ async def call_names(
     wanted = set(user_ids)
     best: dict[int, tuple[int, str]] = {}
     for row in await repo.list_names(group_id):
-        uid = int(row["user_id"])
+        uid = str(row["user_id"])
         if uid not in wanted:
             continue
         weight = int(row["weight"])

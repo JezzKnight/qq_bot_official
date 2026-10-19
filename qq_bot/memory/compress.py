@@ -52,7 +52,7 @@ def format_transcript(messages: list[dict]) -> str:
 async def compress_if_needed(
     repo: PgRepository,
     *,
-    group_id: int,
+    group_id: str,
     config: MemoryConfig,
     summarize: SummaryFn,
 ) -> CompressOutcome | None:
@@ -94,7 +94,7 @@ async def compress_if_needed(
 async def _compress_locked(
     repo: PgRepository,
     *,
-    group_id: int,
+    group_id: str,
     cutoff: int,
     config: MemoryConfig,
     summarize: SummaryFn,

@@ -47,7 +47,7 @@ class PgRepository:
     # ── 线程 ──────────────────────────────────────────────
 
     async def ensure_thread(
-        self, kind: str, group_id: int | None, user_id: int
+        self, kind: str, group_id: str | None, user_id: str
     ) -> int:
         """取或建线程，并刷新活跃时间。"""
         row = await self.pool.fetchrow(
@@ -70,8 +70,8 @@ class PgRepository:
         self,
         *,
         thread_id: int,
-        group_id: int | None,
-        sender_id: int | None,
+        group_id: str | None,
+        sender_id: str | None,
         role: str,
         content: str | None,
         sender_name: str | None = None,
@@ -124,7 +124,7 @@ class PgRepository:
         return [self._to_message(r) for r in reversed(rows)]
 
     async def group_window(
-        self, group_id: int, exclude_thread_id: int, limit: int
+        self, group_id: str, exclude_thread_id: int, limit: int
     ) -> list[ChatMessage]:
         """群窗口：他人的最近 limit 条（排除本人线程，保证与个人线程不重叠）。"""
         rows = await self.pool.fetch(
@@ -152,7 +152,7 @@ class PgRepository:
         *,
         date_str: str,
         limit: int,
-        group_id: int | None = None,
+        group_id: str | None = None,
         thread_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """按日期查消息（按 Asia/Shanghai 自然日），返回扁平 dict。"""
@@ -184,13 +184,13 @@ class PgRepository:
 
     # ── 摘要（P2 使用）────────────────────────────────────
 
-    async def latest_covers_to(self, group_id: int) -> int:
+    async def latest_covers_to(self, group_id: str) -> int:
         value = await self.pool.fetchval(
             "SELECT max(covers_to) FROM group_summaries WHERE group_id = $1", group_id
         )
         return int(value or 0)
 
-    async def latest_summary(self, group_id: int) -> str | None:
+    async def latest_summary(self, group_id: str) -> str | None:
         return await self.pool.fetchval(
             """
             SELECT content FROM group_summaries
@@ -199,7 +199,7 @@ class PgRepository:
             group_id,
         )
 
-    async def count_user_messages_since(self, group_id: int, after_id: int) -> int:
+    async def count_user_messages_since(self, group_id: str, after_id: int) -> int:
         value = await self.pool.fetchval(
             """
             SELECT count(*) FROM messages
@@ -210,7 +210,7 @@ class PgRepository:
         )
         return int(value or 0)
 
-    async def cutoff_for_window(self, group_id: int, window: int) -> int:
+    async def cutoff_for_window(self, group_id: str, window: int) -> int:
         """群窗口最旧一条之前的 id（即压缩上界）。窗口不足时返回 0。"""
         value = await self.pool.fetchval(
             """
@@ -224,7 +224,7 @@ class PgRepository:
         return int(value or 0)
 
     async def group_messages_between(
-        self, group_id: int, after_id: int, until_id: int
+        self, group_id: str, after_id: int, until_id: int
     ) -> list[dict[str, Any]]:
         rows = await self.pool.fetch(
             """
@@ -239,14 +239,14 @@ class PgRepository:
         )
         return [dict(r) for r in rows]
 
-    async def count_summaries(self, group_id: int) -> int:
+    async def count_summaries(self, group_id: str) -> int:
         value = await self.pool.fetchval(
             "SELECT count(*) FROM group_summaries WHERE group_id = $1", group_id
         )
         return int(value or 0)
 
     async def group_messages_for_rebuild(
-        self, group_id: int, until_id: int, limit: int
+        self, group_id: str, until_id: int, limit: int
     ) -> list[dict[str, Any]]:
         """全量重建用：取 cutoff 之前最近 limit 条，按时间正序返回。"""
         rows = await self.pool.fetch(
@@ -262,7 +262,7 @@ class PgRepository:
         )
         return [dict(r) for r in reversed(rows)]
 
-    async def active_group_ids(self, days: int = 7) -> list[int]:
+    async def active_group_ids(self, days: int = 7) -> list[str]:
         """最近活跃的群（启动补扫用）。"""
         rows = await self.pool.fetch(
             """
@@ -272,10 +272,10 @@ class PgRepository:
             """,
             days,
         )
-        return [int(r["group_id"]) for r in rows]
+        return [str(r["group_id"]) for r in rows]
 
     async def insert_summary(
-        self, *, group_id: int, content: str, covers_from: int, covers_to: int
+        self, *, group_id: str, content: str, covers_from: int, covers_to: int
     ) -> None:
         await self.pool.execute(
             """
@@ -294,14 +294,14 @@ class PgRepository:
     # ── 身份 ──────────────────────────────────────────────
 
     async def upsert_members(
-        self, group_id: int, members: list[dict[str, Any]]
+        self, group_id: str, members: list[dict[str, Any]]
     ) -> None:
         """批量写入群成员（users + group_members + 名片别名）。"""
         if not members:
             return
         async with self.pool.acquire() as conn, conn.transaction():
             for m in members:
-                uid = int(m["user_id"])
+                uid = str(m["user_id"])
                 card = (m.get("card") or "").strip()
                 nickname = (m.get("nickname") or "").strip()
                 display = card or nickname
@@ -362,7 +362,7 @@ class PgRepository:
                         weight,
                     )
 
-    async def list_members(self, group_id: int) -> list[dict[str, Any]]:
+    async def list_members(self, group_id: str) -> list[dict[str, Any]]:
         """返回群成员及其称呼（preferred 优先，其次名片/昵称）。"""
         rows = await self.pool.fetch(
             """
@@ -383,7 +383,7 @@ class PgRepository:
 
     # ── 称呼 ─────────────────────────────────────────────
 
-    async def list_names(self, group_id: int | None) -> list[dict[str, Any]]:
+    async def list_names(self, group_id: str | None) -> list[dict[str, Any]]:
         """本群 + 全局的所有称呼行（preferred / 别名 / 名片）。"""
         rows = await self.pool.fetch(
             """
@@ -397,7 +397,7 @@ class PgRepository:
         return [dict(r) for r in rows]
 
     async def find_preferred_owner(
-        self, name_key: str, exclude_uid: int
+        self, name_key: str, exclude_uid: str
     ) -> dict[str, Any] | None:
         """该名字是否已被别人设为 preferred（先到先得）。"""
         row = await self.pool.fetchrow(
@@ -414,7 +414,7 @@ class PgRepository:
         return dict(row) if row else None
 
     async def set_preferred_name(
-        self, user_id: int, name: str, name_key: str
+        self, user_id: str, name: str, name_key: str
     ) -> None:
         """改名：删旧别名 → 当前 preferred 降级为别名 → 写入新 preferred。
 
@@ -441,13 +441,13 @@ class PgRepository:
                 name_key,
             )
 
-    async def clear_names(self, user_id: int) -> None:
+    async def clear_names(self, user_id: str) -> None:
         """清空本人设定的称呼（名片同步行保留）。"""
         await self.pool.execute(
             "DELETE FROM user_names WHERE user_id = $1 AND source = 'user'", user_id
         )
 
-    async def preferred_name(self, user_id: int) -> str | None:
+    async def preferred_name(self, user_id: str) -> str | None:
         return await self.pool.fetchval(
             "SELECT name FROM user_names WHERE user_id = $1 AND is_preferred "
             " ORDER BY weight LIMIT 1",
@@ -460,7 +460,7 @@ class PgRepository:
         self,
         *,
         scope_kind: str,
-        scope_id: int,
+        scope_id: str,
         key: str,
         content: str,
         mem_type: str,
@@ -514,8 +514,8 @@ class PgRepository:
     async def list_memories(
         self,
         *,
-        user_id: int,
-        group_id: int | None,
+        user_id: str,
+        group_id: str | None,
         fresh_within_days: int | None = None,
     ) -> list[dict[str, Any]]:
         """fresh_within_days 非空时只返回近期被确认过的记忆（陈旧记忆不注入）。"""
@@ -537,7 +537,7 @@ class PgRepository:
         return [dict(r) for r in rows]
 
     async def search_memories(
-        self, *, user_id: int, group_id: int | None, query: str
+        self, *, user_id: str, group_id: str | None, query: str
     ) -> list[dict[str, Any]]:
         pattern = f"%{query}%"
         rows = await self.pool.fetch(
@@ -574,7 +574,7 @@ class PgRepository:
         return {key: int(value) for key, value in dict(row).items()}
 
     async def refresh_member_name(
-        self, *, group_id: int, user_id: int, card: str, nickname: str
+        self, *, group_id: str, user_id: str, card: str, nickname: str
     ) -> bool:
         """群名片/昵称变化时增量更新（改名在每条消息上即时生效）。"""
         row = await self.pool.fetchrow(
@@ -591,76 +591,6 @@ class PgRepository:
         return True
 
     # ── 外部身份映射（QQ 官方 openid）────────────────────
-
-    async def ensure_identity(
-        self,
-        *,
-        platform: str,
-        kind: str,
-        external_id: str,
-        display_name: str | None = None,
-    ) -> int:
-        """取或分配内部 id；display_name 有值时顺带更新。"""
-        row = await self.pool.fetchrow(
-            """
-            INSERT INTO identity_map
-                (platform, kind, external_id, display_name)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (platform, kind, external_id) DO UPDATE SET
-                display_name = coalesce(
-                    EXCLUDED.display_name, identity_map.display_name
-                ),
-                updated_at = now()
-            RETURNING internal_id
-            """,
-            platform,
-            kind,
-            external_id,
-            display_name,
-        )
-        return int(row["internal_id"])
-
-    async def bind_identity(
-        self,
-        *,
-        platform: str,
-        kind: str,
-        external_id: str,
-        internal_id: int,
-        display_name: str | None = None,
-    ) -> None:
-        """把外部标识绑定到指定内部 id（OneBot 自映射用）。已存在则只更新显示名。"""
-        await self.pool.execute(
-            """
-            INSERT INTO identity_map
-                (platform, kind, external_id, internal_id, display_name)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (platform, kind, external_id) DO UPDATE SET
-                display_name = coalesce(
-                    EXCLUDED.display_name, identity_map.display_name
-                ),
-                updated_at = now()
-            """,
-            platform,
-            kind,
-            external_id,
-            internal_id,
-            display_name,
-        )
-
-    async def identity_of(
-        self, *, platform: str, kind: str, external_id: str
-    ) -> int | None:
-        value = await self.pool.fetchval(
-            "SELECT internal_id FROM identity_map "
-            " WHERE platform = $1 AND kind = $2 AND external_id = $3",
-            platform,
-            kind,
-            external_id,
-        )
-        return int(value) if value is not None else None
-
-    # ── 表情包 ───────────────────────────────────────────
 
     async def upsert_sticker(
         self,
@@ -739,7 +669,7 @@ class PgRepository:
     async def upsert_glossary_term(
         self,
         *,
-        group_id: int,
+        group_id: str,
         term: str,
         term_key: str,
         definition: str,
@@ -770,7 +700,7 @@ class PgRepository:
             )
             return "updated" if exists else "created"
 
-    async def list_glossary(self, group_id: int) -> list[dict[str, Any]]:
+    async def list_glossary(self, group_id: str) -> list[dict[str, Any]]:
         rows = await self.pool.fetch(
             """
             SELECT term, term_key, definition, created_at, updated_at

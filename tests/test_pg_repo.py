@@ -6,27 +6,27 @@ from qq_bot.memory.memory_config import BudgetConfig, MemoryConfig, ShortTermCon
 
 
 async def test_ensure_thread_is_idempotent_for_private(repo) -> None:
-    first = await repo.ensure_thread("private", None, 42)
-    second = await repo.ensure_thread("private", None, 42)
+    first = await repo.ensure_thread("private", None, "U42")
+    second = await repo.ensure_thread("private", None, "U42")
     assert first == second
 
 
 async def test_ensure_thread_is_idempotent_for_group(repo) -> None:
-    a = await repo.ensure_thread("group_member", 100, 7)
-    b = await repo.ensure_thread("group_member", 100, 7)
+    a = await repo.ensure_thread("group_member", "G100", "U7")
+    b = await repo.ensure_thread("group_member", "G100", "U7")
     assert a == b
-    other = await repo.ensure_thread("group_member", 100, 8)
+    other = await repo.ensure_thread("group_member", "G100", "U8")
     assert other != a
 
 
 async def test_append_and_history_ordered(repo) -> None:
-    tid = await repo.ensure_thread("group_member", 100, 7)
+    tid = await repo.ensure_thread("group_member", "G100", "U7")
     await repo.append(
-        thread_id=tid, group_id=100, sender_id=7, role="user",
+        thread_id=tid, group_id="G100", sender_id="U7", role="user",
         content="第一句", sender_name="小明",
     )
     await repo.append(
-        thread_id=tid, group_id=100, sender_id=None, role="assistant",
+        thread_id=tid, group_id="G100", sender_id=None, role="assistant",
         content="第一句回复",
     )
     history = await repo.history(tid, 10)
@@ -36,26 +36,26 @@ async def test_append_and_history_ordered(repo) -> None:
 
 
 async def test_group_window_excludes_own_thread(repo) -> None:
-    mine = await repo.ensure_thread("group_member", 100, 7)
-    other = await repo.ensure_thread("group_member", 100, 8)
+    mine = await repo.ensure_thread("group_member", "G100", "U7")
+    other = await repo.ensure_thread("group_member", "G100", "U8")
     await repo.append(
-        thread_id=mine, group_id=100, sender_id=7, role="user",
+        thread_id=mine, group_id="G100", sender_id="U7", role="user",
         content="我说的", sender_name="小明",
     )
     await repo.append(
-        thread_id=other, group_id=100, sender_id=8, role="user",
+        thread_id=other, group_id="G100", sender_id="U8", role="user",
         content="别人说的", sender_name="阿强",
     )
-    window = await repo.group_window(100, mine, 10)
+    window = await repo.group_window("G100", mine, 10)
     assert [m.content for m in window] == ["别人说的"]
 
 
 async def test_clear_thread_isolated(repo) -> None:
-    mine = await repo.ensure_thread("group_member", 100, 7)
-    other = await repo.ensure_thread("group_member", 100, 8)
-    for tid, uid in ((mine, 7), (other, 8)):
+    mine = await repo.ensure_thread("group_member", "G100", "U7")
+    other = await repo.ensure_thread("group_member", "G100", "U8")
+    for tid, uid in ((mine, "U7"), (other, "U8")):
         await repo.append(
-            thread_id=tid, group_id=100, sender_id=uid, role="user", content="hi"
+            thread_id=tid, group_id="G100", sender_id=uid, role="user", content="hi"
         )
     deleted = await repo.clear_thread(mine)
     assert deleted == 1
@@ -66,21 +66,21 @@ async def test_clear_thread_isolated(repo) -> None:
 async def test_build_context_does_not_overlap(repo) -> None:
     from qq_bot.memory.assembler import build_context
 
-    mine = await repo.ensure_thread("group_member", 100, 7)
-    other = await repo.ensure_thread("group_member", 100, 8)
+    mine = await repo.ensure_thread("group_member", "G100", "U7")
+    other = await repo.ensure_thread("group_member", "G100", "U8")
     await repo.append(
-        thread_id=mine, group_id=100, sender_id=7, role="user",
+        thread_id=mine, group_id="G100", sender_id="U7", role="user",
         content="我的消息", sender_name="小明",
     )
     await repo.append(
-        thread_id=other, group_id=100, sender_id=8, role="user",
+        thread_id=other, group_id="G100", sender_id="U8", role="user",
         content="他的消息", sender_name="阿强",
     )
     cfg = MemoryConfig(
         short_term=ShortTermConfig(group_window=10, thread_window=10),
         budget=BudgetConfig(group_window=10_000, thread_window=10_000),
     )
-    parts = await build_context(repo, thread_id=mine, group_id=100, config=cfg)
+    parts = await build_context(repo, thread_id=mine, group_id="G100", config=cfg)
     mine_text = [m.content for m in parts.thread_window]
     other_text = [m.content for m in parts.group_window]
     assert mine_text == ["我的消息"]
