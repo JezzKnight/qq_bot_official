@@ -34,7 +34,9 @@ HELP_TEXT = """能用这些指令
 /reboot 重启机器人（仅管理员）"""
 
 
-async def handle_command(event: Any, reply: QQReply, repo: Any) -> None:
+async def handle_command(  # noqa: PLR0911
+    event: Any, reply: QQReply, repo: Any
+) -> None:
     """解析并执行指令；未知指令给友好提示。"""
     try:
         text = event.get_message().extract_plain_text()
@@ -55,7 +57,7 @@ async def handle_command(event: Any, reply: QQReply, repo: Any) -> None:
         return
 
     if name in ("model", "模型", "切换模型"):
-        await _model(event, reply, repo, args)
+        await _model(event, reply, args)
         return
 
     if name in ("pixiv", "图来", "来点色图"):
@@ -100,7 +102,7 @@ async def _usage(reply: QQReply, repo: Any) -> None:
     await reply.passive("\n".join(lines))
 
 
-async def _model(event: Any, reply: QQReply, repo: Any, arg: str) -> None:
+async def _model(event: Any, reply: QQReply, arg: str) -> None:
     incoming = qq_from_event(event, reply=reply)
     uid = incoming.user_key
     gid = incoming.group_key
