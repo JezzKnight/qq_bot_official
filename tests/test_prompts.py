@@ -28,16 +28,10 @@ def test_chain_version() -> None:
     assert all(ref.version.startswith("v") for ref in prompt_service.modules)
 
 
-def test_chain_order_includes_platform_module() -> None:
+def test_chain_order_includes_all_modules() -> None:
     text = prompt_service.get_system_prompt()
-    names = [*BASE_ORDER, "platform", "style"]
+    names = [*BASE_ORDER, "platform", "style", "multimodal"]
     assert _positions(text, names) == sorted(_positions(text, names))
-    assert _marker("multimodal") not in text
-
-
-def test_multimodal_included_when_requested() -> None:
-    text = prompt_service.get_system_prompt(include_multimodal=True)
-    assert _marker("multimodal") in text
 
 
 def test_group_prompt_is_separate() -> None:

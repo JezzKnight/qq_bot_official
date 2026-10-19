@@ -71,13 +71,6 @@ def patched(monkeypatch, repo):
         "get_model_params",
         lambda _m: SimpleNamespace(temperature=0.7, max_tokens=100),
     )
-    monkeypatch.setattr(
-        turn_mod,
-        "get_model_profile",
-        lambda _m: SimpleNamespace(
-            capabilities=SimpleNamespace(supports_vision=False, supports_video=False)
-        ),
-    )
     monkeypatch.setattr(turn_mod, "get_session_model", lambda _s, _d: "test-model")
     monkeypatch.setattr(turn_mod, "catalog_text", lambda: "")
     monkeypatch.setattr(

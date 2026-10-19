@@ -30,7 +30,6 @@ from qq_bot.services.client_factory import (
     get_client_for_model,
     get_image_edit_spec,
     get_model_params,
-    get_model_profile,
 )
 from qq_bot.services.dynamic_injection import (
     build_memory_injection,
@@ -127,10 +126,6 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     session_id = f"group_{gid}" if is_group else f"user_{uid}"
     model_name = get_session_model(session_id, default_model_name())
     model_params = get_model_params(model_name)
-    profile = get_model_profile(model_name)
-    include_media = bool(
-        profile.capabilities.supports_vision or profile.capabilities.supports_video
-    )
 
     thread_id: int | None = None
     parts = ContextParts()
@@ -157,9 +152,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
             except Exception:
                 logger.debug("成员名片刷新失败", exc_info=True)
 
-    system_part = prompt_service.get_system_prompt(
-        include_multimodal=include_media
-    )
+    system_part = prompt_service.get_system_prompt()
     if is_group:
         member_info = await members_xml(memory, gid) if memory is not None else None
         if not member_info and bootstrap_members is not None:  # noqa: SIM102

@@ -89,18 +89,10 @@ class PromptService:
             return name, version
         return raw, ""
 
-    def get_system_prompt(
-        self, *, include_multimodal: bool = False, **variables: str
-    ) -> str:
-        """按链路顺序拼装系统提示词（QQ 专用）。
-
-        include_multimodal 决定是否追加 multimodal 模块：普通文本模型跳过，
-        保持提示词前缀稳定以命中缓存。
-        """
+    def get_system_prompt(self, **variables: str) -> str:
+        """按链路顺序拼装系统提示词（QQ 专用，所有模块恒定加载）。"""
         parts: list[str] = []
         for ref in self._modules:
-            if ref.name == "multimodal" and not include_multimodal:
-                continue
             content = self._loader.load(ref.file)
             if content.strip():
                 parts.append(content)
