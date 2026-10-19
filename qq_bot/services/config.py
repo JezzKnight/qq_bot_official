@@ -14,23 +14,9 @@ class AiChatConfig(BaseModel):
     glossary_enabled: bool = True  # 术语库注入开关
 
     # ── 管理员（/reboot）──
-    admin_openids: list[str] = []
-
-    @field_validator("admin_openids", mode="before")
-    @classmethod
-    def parse_admin_openids(cls, v: object) -> list[str]:
-        """解析 ADMIN_OPENIDS：JSON 数组 / 逗号分隔 / 单值。"""
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return [str(x).strip() for x in v if str(x).strip()]
-        text = str(v).strip()
-        if not text:
-            return []
-        if text.startswith("["):
-            import json
-            return [str(x).strip() for x in json.loads(text) if str(x).strip()]
-        return [x.strip() for x in text.split(",") if x.strip()]
+    # 保持 str：NoneBot/pydantic-settings 会把 list[str] 当 JSON 解析，
+    # 逗号分隔的 openid 会在 validator 之前就报 SettingsError。
+    admin_openids: str = ""
 
     # ── 频率控制 ──
     cooldown_seconds: int = 5                       # 单用户冷却秒数

@@ -129,7 +129,7 @@ async def _model(event: Any, reply: QQReply, arg: str) -> None:
 async def _reboot(event: Any, reply: QQReply) -> None:
     incoming = qq_from_event(event, reply=reply)
     config = get_plugin_config(AiChatConfig)
-    admins = set(config.admin_openids)
+    admins = {x.strip() for x in config.admin_openids.split(",") if x.strip()}
     if not admins:
         await reply.passive("未配置 ADMIN_OPENIDS，无法执行重启")
         return
