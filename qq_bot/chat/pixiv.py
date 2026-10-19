@@ -8,7 +8,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_MODES = {
     "",
@@ -39,6 +43,7 @@ def _client_kwargs(proxy: str) -> dict:
 
 async def _get_access_token(proxy: str, refresh_tokens: list[str]) -> str:
     if not refresh_tokens:
+        logger.warning("Pixiv 未配置 REFRESH_TOKEN")
         return ""
     data = {
         "grant_type": "refresh_token",
@@ -56,8 +61,23 @@ async def _get_access_token(proxy: str, refresh_tokens: list[str]) -> str:
                 headers={"User-Agent": _HEADERS["User-Agent"]},
                 data=data,
             )
-            return resp.json().get("access_token") or ""
-        except Exception:  # noqa: BLE001 —— 网络失败按空 token 处理
+            if resp.status_code != 200:
+                logger.warning(
+                    "Pixiv OAuth HTTP %s: %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                return ""
+            token = resp.json().get("access_token") or ""
+            if not token:
+                logger.warning("Pixiv OAuth 响应没有 access_token")
+            return token
+        except Exception as exc:  # noqa: BLE001 —— 网络失败按空 token 处理
+            logger.warning(
+                "Pixiv OAuth 请求异常（检查 PROXY）: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
             return ""
 
 
@@ -72,8 +92,22 @@ async def _get_rank_info(access_token: str, mode: str, proxy: str) -> list[dict]
                 headers=headers,
                 params={"mode": mode},
             )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Pixiv ranking mode=%s HTTP %s: %s",
+                    mode,
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                return []
             return resp.json().get("illusts") or []
-        except Exception:  # noqa: BLE001 —— 网络失败按空榜单处理
+        except Exception as exc:  # noqa: BLE001 —— 网络失败按空榜单处理
+            logger.warning(
+                "Pixiv ranking 请求异常 mode=%s: %s: %s",
+                mode,
+                type(exc).__name__,
+                exc,
+            )
             return []
 
 
@@ -145,7 +179,7 @@ async def fetch_pixiv_images(
     if not info_path.exists():
         token = await _get_access_token(proxy, list(refresh_tokens or []))
         if not token:
-            return "获取 Pixiv token 失败，检查 refresh_token"
+            return "获取 Pixiv token 失败：检查代理是否可用 / refresh_token 是否失效"
         rank = await _get_rank_info(token, mode, proxy)
         if not rank:
             return "获取排行榜失败，稍后再试"
