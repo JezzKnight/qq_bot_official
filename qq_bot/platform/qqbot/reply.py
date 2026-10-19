@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 SEND_TIMEOUT = 25.0
 # QQ 开放平台：40034006 = 消息内容违规
 CONTENT_VIOLATION_CODE = 40034006
-CONTENT_VIOLATION_NOTICE = "发送图片失败，消息内容违规QAQ"
+CONTENT_VIOLATION_NOTICE = "发送图片失败，消息内容违规 QAQ"
 
 
 class QQReply:

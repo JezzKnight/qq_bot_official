@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
@@ -29,7 +30,8 @@ HELP_TEXT = """能用这些指令
 /usage 查看今日 token 用量
 /model [模型名] 查看或切换模型
 /pixiv [类型] 随机来一张 Pixiv 排行榜图片
-/whoami 查看机器人记录的你的信息"""
+/whoami 查看机器人记录的你的信息
+/reboot 重启机器人（仅管理员）"""
 
 
 async def handle_command(event: Any, reply: QQReply, repo: Any) -> None:
@@ -64,10 +66,17 @@ async def handle_command(event: Any, reply: QQReply, repo: Any) -> None:
         await _whoami(event, reply, repo)
         return
 
+    if name in ("reboot", "重启", "重启服务"):
+        await _reboot(event, reply)
+        return
+
     await reply.passive(f"没有 /{name} 这个指令 发 /help 看看")
 
 
 async def _reset(event: Any, reply: QQReply, repo: Any) -> None:
+    if repo is None:
+        await reply.passive("记忆库暂时不可用 稍后再试")
+        return
     incoming = qq_from_event(event, reply=reply)
     uid = incoming.user_key
     gid = incoming.group_key
@@ -79,6 +88,9 @@ async def _reset(event: Any, reply: QQReply, repo: Any) -> None:
 
 
 async def _usage(reply: QQReply, repo: Any) -> None:
+    if repo is None:
+        await reply.passive("记忆库暂时不可用 稍后再试")
+        return
     today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
     summary = await repo.usage_summary(today)
     lines = format_usage(summary, today, today)
@@ -112,6 +124,21 @@ async def _model(event: Any, reply: QQReply, repo: Any, arg: str) -> None:
     await reply.passive(f"已切换到 {arg}")
 
 
+async def _reboot(event: Any, reply: QQReply) -> None:
+    incoming = qq_from_event(event, reply=reply)
+    config = get_plugin_config(AiChatConfig)
+    admins = set(config.admin_openids)
+    if not admins:
+        await reply.passive("未配置 ADMIN_OPENIDS，无法执行重启")
+        return
+    if incoming.user_key not in admins:
+        await reply.passive("你没有权限执行此操作")
+        return
+    await reply.passive("正在重启...")
+    await asyncio.sleep(0.5)
+    os._exit(0)
+
+
 async def _pixiv(event: Any, reply: QQReply, arg: str) -> None:
     incoming = qq_from_event(event, reply=reply)
     config = get_plugin_config(AiChatConfig)
@@ -138,6 +165,9 @@ async def _pixiv(event: Any, reply: QQReply, arg: str) -> None:
 
 async def _whoami(event: Any, reply: QQReply, repo: Any) -> None:
     """展示机器人当前掌握的本人信息（openid 只显示尾号）。"""
+    if repo is None:
+        await reply.passive("记忆库暂时不可用 稍后再试")
+        return
     incoming = qq_from_event(event, reply=reply)
     uid = incoming.user_key
     gid = incoming.group_key

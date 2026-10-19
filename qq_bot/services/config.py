@@ -2,7 +2,7 @@ from pydantic import BaseModel, field_validator
 
 
 class AiChatConfig(BaseModel):
-    # 继承自pydantic的基类，能够继承两个能力，一、能够自动进行类型校验 二、自动从环境变量读取配置
+    # 继承 pydantic BaseModel：自动类型校验 + 从环境变量读取配置
     # 模型端点与参数统一由 model.yaml 提供（qq_bot/ai/model_registry.py）；
     # 本类只保留与模型无关的运行时配置，密钥经 .env 注入环境变量。
 
@@ -10,8 +10,27 @@ class AiChatConfig(BaseModel):
     max_context_tokens: int = 8192                 # 上下文总 token 上限
 
     # ── 动态记忆注入 ──
-    memory_injection_enabled: bool = True      # 群聊动态注入总开关（False → 不注入长期记忆）
-    glossary_enabled: bool = True              # 术语库注入开关（匹配命中时是否注入词义）
+    memory_injection_enabled: bool = True  # 群聊动态注入总开关
+    glossary_enabled: bool = True  # 术语库注入开关
+
+    # ── 管理员（/reboot）──
+    admin_openids: list[str] = []
+
+    @field_validator("admin_openids", mode="before")
+    @classmethod
+    def parse_admin_openids(cls, v: object) -> list[str]:
+        """解析 ADMIN_OPENIDS：JSON 数组 / 逗号分隔 / 单值。"""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        text = str(v).strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            import json
+            return [str(x).strip() for x in json.loads(text) if str(x).strip()]
+        return [x.strip() for x in text.split(",") if x.strip()]
 
     # ── 频率控制 ──
     cooldown_seconds: int = 5                       # 单用户冷却秒数

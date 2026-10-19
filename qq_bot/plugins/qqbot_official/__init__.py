@@ -158,9 +158,7 @@ if _FULL_GROUP:
 async def handle_cmd(bot: Bot, event: QQMessageEvent) -> None:
     repo = await get_memory()
     reply = QQReply(bot, event)
-    if repo is None:
-        await reply.text("记忆库暂时不可用 稍后再试")
-        return
+    # 不在这里拦截 None：/reboot、/pixiv 不依赖记忆库，仍然可用
     await handle_command(event, reply, repo)
 
 
