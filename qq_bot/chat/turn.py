@@ -24,23 +24,23 @@ from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.memory.naming import escape_for_prompt
 from qq_bot.platform.identity import resolve_group, resolve_user
 from qq_bot.platform.reply import split_for_reply
-from qq_bot.plugins.ai_chat import token_usage
-from qq_bot.plugins.ai_chat.client_factory import (
+from qq_bot.services import token_usage
+from qq_bot.services.client_factory import (
     default_model_name,
     get_client_for_model,
     get_image_edit_spec,
     get_model_params,
     get_model_profile,
 )
-from qq_bot.plugins.ai_chat.dynamic_injection import (
+from qq_bot.services.dynamic_injection import (
     build_memory_injection,
     build_private_injection,
 )
-from qq_bot.plugins.ai_chat.memory_compress import schedule_compress
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
-from qq_bot.plugins.ai_chat.session_store import get_session_model
-from qq_bot.plugins.ai_chat.sticker_sync import catalog_text
-from qq_bot.plugins.ai_chat.tools import (
+from qq_bot.services.memory_compress import schedule_compress
+from qq_bot.services.memory_writing import get_memory
+from qq_bot.services.session_store import get_session_model
+from qq_bot.services.sticker_sync import catalog_text
+from qq_bot.tools import (
     TOOLS,
     SearchTracker,
     current_edited_images,
@@ -102,24 +102,20 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     memory = await get_memory()
 
     if memory is None:
-        if incoming.platform != "onebot":
-            return "记忆库暂时不可用 稍后再试"
-        uid = int(incoming.user_key)
-        gid: int | None = int(incoming.group_key) if incoming.group_key else None
-    else:
-        uid = await resolve_user(
-            memory,
-            platform=incoming.platform,
-            external_id=incoming.user_key,
-            display_name=sender_name,
+        return "记忆库暂时不可用 稍后再试"
+    uid = await resolve_user(
+        memory,
+        platform=incoming.platform,
+        external_id=incoming.user_key,
+        display_name=sender_name,
+    )
+    gid = (
+        await resolve_group(
+            memory, platform=incoming.platform, external_id=incoming.group_key
         )
-        gid = (
-            await resolve_group(
-                memory, platform=incoming.platform, external_id=incoming.group_key
-            )
-            if incoming.group_key
-            else None
-        )
+        if incoming.group_key
+        else None
+    )
 
     scope = f"groups/{gid}/{uid}" if is_group else f"private/{uid}"
     current_scope.set(scope)

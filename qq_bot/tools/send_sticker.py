@@ -2,8 +2,8 @@
 """表情包发送工具：把选中的表情包排入本轮回复（文字之后发出）。"""
 
 from qq_bot.memory.stickers import resolve
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
-from qq_bot.plugins.ai_chat.sticker_sync import stickers_dir
+from qq_bot.services.memory_writing import get_memory
+from qq_bot.services.sticker_sync import stickers_dir
 
 from .context import current_pending_sticker
 from .registry import register_tool

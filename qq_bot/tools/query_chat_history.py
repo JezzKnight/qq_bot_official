@@ -7,11 +7,9 @@
 """
 from datetime import datetime, timedelta
 
-from .registry import register_tool
+from ..services.memory_writing import get_memory
 from .context import current_scope
-from ..memory_writing import get_memory
-from ..config import AiChatConfig
-from nonebot import get_plugin_config
+from .registry import register_tool
 
 
 def _resolve_date(date_input: str) -> str | None:
@@ -73,7 +71,7 @@ def _format_messages(rows: list[dict], date_str: str) -> str:
             content = content[:500] + "..."
 
         if role == "user":
-            label = name if name else "用户"
+            label = name or "用户"
             lines.append(f"[{time_part}] {label}: {content}")
         elif role == "assistant":
             lines.append(f"[{time_part}] assistant: {content}")

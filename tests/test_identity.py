@@ -14,17 +14,14 @@ async def test_identity_is_stable(repo) -> None:
     assert first >= 1_000_000_000  # 避开真实 QQ 号段
 
 
-async def test_identity_kinds_and_platforms_are_separate(repo) -> None:
+async def test_identity_kinds_are_separate(repo) -> None:
     user = await repo.ensure_identity(
         platform="qq", kind="user", external_id="same-id"
     )
     group = await repo.ensure_identity(
         platform="qq", kind="group", external_id="same-id"
     )
-    onebot_user = await repo.ensure_identity(
-        platform="onebot", kind="user", external_id="same-id"
-    )
-    assert len({user, group, onebot_user}) == 3
+    assert len({user, group}) == 2
 
 
 async def test_identity_display_name_updates(repo) -> None:

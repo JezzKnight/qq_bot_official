@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 TOOLS: dict[str, dict] = {}
 
@@ -28,15 +28,14 @@ def get_tools_schema(*args) -> list[dict]:
             else:
                 continue
         return tools_list
-    else:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": i["name"],
-                    "description": i["description"],
-                    "parameters": i["parameters"],
-                },
-            }
-            for i in TOOLS.values()
-        ]
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": i["name"],
+                "description": i["description"],
+                "parameters": i["parameters"],
+            },
+        }
+        for i in TOOLS.values()
+    ]

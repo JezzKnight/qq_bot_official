@@ -114,7 +114,7 @@ class PromptService:
     def get_system_prompt(
         self,
         *,
-        platform: str = "onebot",
+        platform: str = "qq",
         include_multimodal: bool = False,
         **variables: str,
     ) -> str:

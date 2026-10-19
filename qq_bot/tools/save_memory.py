@@ -2,7 +2,7 @@
 """长期记忆保存工具：AI 将当前用户/群的稳定信息写入 memories 表（L3）。"""
 
 from qq_bot.memory.naming import normalize
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
+from qq_bot.services.memory_writing import get_memory
 
 from .context import current_scope
 from .registry import register_tool

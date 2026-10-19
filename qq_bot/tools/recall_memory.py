@@ -1,7 +1,7 @@
 # ruff: noqa: E501   # 工具描述含中文长句，行宽超过 88 属有意为之
 """成员长期记忆查询工具：按需读取指定成员的长期记忆（L3）。"""
 
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
+from qq_bot.services.memory_writing import get_memory
 
 from .context import current_scope
 from .registry import register_tool

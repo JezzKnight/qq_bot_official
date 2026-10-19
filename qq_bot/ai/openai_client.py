@@ -1,7 +1,10 @@
-import httpx
 import asyncio
 from typing import Any
+
+import httpx
+
 from .types import ChatMessage, ChatResponse
+
 
 class OpenaiCompatClient:
     """唯一的模型传输层：所有平台（DeepSeek / 硅基流动 / 智谱 BigModel / 本地模型）统一走 OpenAI 兼容接口。
@@ -67,7 +70,7 @@ class OpenaiCompatClient:
                     msg["content"] = content_parts
                 else:
                     msg["content"] = m.content
-            
+
             if m.tool_calls is not None:
                 msg["tool_calls"] = m.tool_calls
             if m.tool_call_id is not None:
@@ -171,9 +174,9 @@ class OpenaiCompatClient:
             # 思考模式推理内容，供多轮/工具调用时回传
             reasoning_content = message.get("reasoning_content"),
         )
-        
+
 
     async def close(self):
         await self._client.aclose()
-    
-    
+
+

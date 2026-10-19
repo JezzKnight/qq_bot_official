@@ -55,9 +55,9 @@ def provider_display_name(platform: str) -> str:
 _BUILTIN: dict[str, ModelCapabilities] = {
     # ── 智谱 BigModel (GLM) ──
     "glm-5.3-flash": ModelCapabilities(
-        supports_vision=True, 
+        supports_vision=True,
         supports_video=True,
-        supports_tools=True, 
+        supports_tools=True,
         supports_reasoning=True
     ),
     "glm-5.3": ModelCapabilities(
@@ -90,12 +90,12 @@ _BUILTIN: dict[str, ModelCapabilities] = {
     ),
     # reasoner 系列历史上不保证 function calling，tools 留未知
     "deepseek-reasoner": ModelCapabilities(
-        supports_video=False, 
+        supports_video=False,
         supports_reasoning=True
     ),
     # ── 硅基流动 (SiliconFlow) 常见的路径形式型号 ──
     "deepseek-ai/DeepSeek-R1": ModelCapabilities(
-        supports_video=False, 
+        supports_video=False,
         supports_reasoning=True
     ),
 }

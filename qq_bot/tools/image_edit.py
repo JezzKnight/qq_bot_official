@@ -21,21 +21,21 @@ from qq_bot.agents.image_edit_agent import ImageEditAgent
 from qq_bot.ai.image_edit_client import ImageEditError
 from qq_bot.ai.model_registry import ImageEditSpec
 from qq_bot.ai.types import ImageData
-from qq_bot.plugins.ai_chat import token_usage
-from qq_bot.plugins.ai_chat.client_factory import (
+from qq_bot.services import token_usage
+from qq_bot.services.client_factory import (
     default_model_name,
     get_client_for_model,
     get_image_edit_client,
     get_image_edit_spec,
 )
-from qq_bot.plugins.ai_chat.session_store import get_session_model
-from qq_bot.plugins.ai_chat.tools.context import (
+from qq_bot.services.session_store import get_session_model
+from qq_bot.tools.context import (
     current_edited_images,
     current_images,
     current_scope,
     current_send_msg,
 )
-from qq_bot.plugins.ai_chat.tools.registry import TOOLS, register_tool
+from qq_bot.tools.registry import TOOLS, register_tool
 
 logger = logging.getLogger(__name__)
 

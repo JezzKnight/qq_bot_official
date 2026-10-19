@@ -16,7 +16,7 @@ from qq_bot.memory.glossary import format_injection, match_terms
 from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.memory.naming import escape_for_prompt, resolve_mentions
 from qq_bot.memory.selection import format_memory_block, pick_memories
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
+from qq_bot.services.memory_writing import get_memory
 
 if TYPE_CHECKING:
     from qq_bot.memory.pg_repo import PgRepository

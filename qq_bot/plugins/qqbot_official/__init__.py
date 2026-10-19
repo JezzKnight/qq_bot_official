@@ -1,7 +1,7 @@
 """QQ 开放平台接入（官方 API）。
 
 接线层：事件 → Incoming → 平台无关的 run_turn。
-启用方式：`.env` 设 `PLATFORM=qq` 并配置 `QQ_BOTS`。
+启用方式：配置 `.env` 的 `QQ_BOTS` 后运行 `./run_bot.sh`。
 """
 
 import logging
@@ -23,10 +23,10 @@ from qq_bot.chat.turn import run_turn
 from qq_bot.platform.identity import resolve_group, resolve_user
 from qq_bot.platform.qqbot.incoming import from_event as qq_from_event
 from qq_bot.platform.qqbot.reply import QQReply
-from qq_bot.plugins.ai_chat.config import AiChatConfig
-from qq_bot.plugins.ai_chat.memory_compress import schedule_compress
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
-from qq_bot.plugins.ai_chat.sticker_sync import sync_stickers
+from qq_bot.services.config import AiChatConfig
+from qq_bot.services.memory_compress import schedule_compress
+from qq_bot.services.memory_writing import get_memory
+from qq_bot.services.sticker_sync import sync_stickers
 
 from .commands import handle_command
 

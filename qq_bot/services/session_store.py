@@ -36,7 +36,7 @@ def _save_session_models():
     global _models_file
     if _models_file is None:
         _models_file = _get_models_file()
-    
+
     _models_file.parent.mkdir(parents=True, exist_ok=True)
     _models_file.write_text(
         json.dumps(_session_models, ensure_ascii=False, indent=2),

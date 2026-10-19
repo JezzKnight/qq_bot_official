@@ -23,7 +23,7 @@ def _get_client() -> TavilyClient:
     description="使用 Tavily 搜索引擎在互联网上查找最新或通用的网页信息。可以根据用户意图自动判断搜索类型、时效性和网站过滤。",
     parameters={"type": "object",
                 "properties": {
-                "query":{    
+                "query":{
                     "type": "string",
                     "description": "搜索查询词。必须从用户对话中提炼出最核心的关键词，生成简洁、精准、适合搜索引擎的短语。例如用户说‘我想了解一下气候变化对北极熊的影响’，query 应为‘气候变化 北极熊 影响’。"
                     },
@@ -70,17 +70,15 @@ async def web_search(query: str,
         if tracker is not None:
             tracker["tavily_error_count"] += 1
         return "Error: Tavily web searcher does not return any results."
-    else:
-        formatted = _search_result_payload(results)
-        if not formatted:
-            # Tavily 返回了响应但内容为空
-            if tracker is not None:
-                tracker["tavily_error_count"] += 1
-        else:
-            # 成功获取到有效搜索结果
-            if tracker is not None:
-                tracker["tavily_success"] = True
-        return formatted
+    formatted = _search_result_payload(results)
+    if not formatted:
+        # Tavily 返回了响应但内容为空
+        if tracker is not None:
+            tracker["tavily_error_count"] += 1
+    # 成功获取到有效搜索结果
+    elif tracker is not None:
+        tracker["tavily_success"] = True
+    return formatted
 
 
 async def web_search_by_tavily(payload) -> dict:
@@ -105,7 +103,7 @@ def _search_result_payload(data: dict):
             f"{idx}.{r['title']}\n"
             f"URL:{r['url']}\n"
             f"摘要:{r['content']}\n"
-            
+
         )
 
     return "\n\n".join(lines)

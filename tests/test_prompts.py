@@ -28,19 +28,11 @@ def test_chain_version() -> None:
     assert all(ref.version.startswith("v") for ref in prompt_service.modules)
 
 
-def test_onebot_chain_includes_onebot_module() -> None:
-    text = prompt_service.get_system_prompt(platform="onebot")
-    names = [*BASE_ORDER, "platform-onebot", "style"]
-    assert _positions(text, names) == sorted(_positions(text, names))
-    assert _marker("platform-qq") not in text
-    assert _marker("multimodal") not in text
-
-
 def test_qq_chain_includes_qq_module() -> None:
     text = prompt_service.get_system_prompt(platform="qq")
     names = [*BASE_ORDER, "platform-qq", "style"]
     assert _positions(text, names) == sorted(_positions(text, names))
-    assert _marker("platform-onebot") not in text
+    assert _marker("multimodal") not in text
 
 
 def test_multimodal_included_when_requested() -> None:

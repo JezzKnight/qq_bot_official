@@ -16,10 +16,10 @@ from qq_bot.chat.pixiv import fetch_pixiv_images
 from qq_bot.chat.usage import format_usage, memory_stats_line
 from qq_bot.platform.identity import resolve_group, resolve_user
 from qq_bot.platform.qqbot.incoming import from_event as qq_from_event
-from qq_bot.plugins.ai_chat.client_factory import default_model_name
-from qq_bot.plugins.ai_chat.commands.cooldown import check_cooldown
-from qq_bot.plugins.ai_chat.config import AiChatConfig
-from qq_bot.plugins.ai_chat.session_store import get_session_model, set_session_model
+from qq_bot.services.client_factory import default_model_name
+from qq_bot.services.config import AiChatConfig
+from qq_bot.services.cooldown import check_cooldown
+from qq_bot.services.session_store import get_session_model, set_session_model
 
 if TYPE_CHECKING:
     from qq_bot.platform.qqbot.reply import QQReply

@@ -12,9 +12,6 @@ modules:
   - constraints.v1
   - guidelines.v1
   - capabilities.v1
-  - name: platform-onebot
-    version: v1
-    when: onebot
   - name: platform-qq
     version: v1
     when: qq

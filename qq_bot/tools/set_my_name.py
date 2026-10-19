@@ -2,7 +2,7 @@
 """称呼设置工具：用户明确要求「以后叫我 X」时写入 user_names。"""
 
 from qq_bot.memory.naming import set_my_name as apply_name
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
+from qq_bot.services.memory_writing import get_memory
 
 from .context import current_scope
 from .registry import register_tool

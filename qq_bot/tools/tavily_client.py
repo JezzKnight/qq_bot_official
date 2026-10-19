@@ -12,7 +12,7 @@ import logging
 import httpx
 from nonebot import get_plugin_config
 
-from qq_bot.plugins.ai_chat.config import AiChatConfig
+from qq_bot.services.config import AiChatConfig
 
 logger = logging.getLogger(__name__)
 

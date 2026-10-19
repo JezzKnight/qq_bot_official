@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 
 from qq_bot.chat import turn as turn_mod
-from qq_bot.platform.onebot.incoming import ONEBOT_CAPS
 from qq_bot.platform.ports import Incoming, PlatformCaps
+from qq_bot.platform.qqbot.incoming import QQ_CAPS
 
 
 class FakeReply:
@@ -99,15 +99,15 @@ def _async_value(value):
 
 def _incoming(reply: FakeReply, *, group: str | None = None) -> Incoming:
     return Incoming(
-        platform="onebot",
-        user_key="12345",
+        platform="qq",
+        user_key="openid-12345",
         group_key=group,
         display_name="测试用户",
         text="你好",
         images=[],
         message_id="1",
         reply=reply,
-        caps=ONEBOT_CAPS,
+        caps=QQ_CAPS,
         self_key="999",
         card="",
         nickname="测试用户",
@@ -129,7 +129,7 @@ async def test_group_turn_mentions_sender(patched) -> None:  # noqa: ARG001
     await turn_mod.run_turn(_incoming(reply, group="795245301"), config=_config())
     assert reply.finished is True
     assert reply.sent[0][0] == "mention"
-    assert reply.sent[0][1].startswith("12345|")
+    assert reply.sent[0][1].startswith("openid-12345|")
 
 
 async def patched_repo_rows():
@@ -156,4 +156,15 @@ def test_compression_skipped_without_full_group_access() -> None:
 
 
 def test_compression_enabled_with_full_group_access() -> None:
-    assert turn_mod._compression_scheduler(_incoming(FakeReply())) is not None
+    incoming = dataclasses.replace(
+        _incoming(FakeReply()),
+        caps=PlatformCaps(
+            can_list_members=False,
+            can_see_all_group_messages=True,
+            can_send_image=True,
+            can_active_message=False,
+            max_reply_parts=4,
+            can_progress_messages=False,
+        ),
+    )
+    assert turn_mod._compression_scheduler(incoming) is not None

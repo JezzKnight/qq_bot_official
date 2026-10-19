@@ -3,7 +3,7 @@
 存储：PostgreSQL 的 glossary_terms 表（group_id + term_key 唯一）。
 """
 from qq_bot.memory.naming import normalize
-from qq_bot.plugins.ai_chat.memory_writing import get_memory
+from qq_bot.services.memory_writing import get_memory
 
 from .context import current_scope
 from .registry import register_tool

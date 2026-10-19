@@ -9,6 +9,6 @@ def check_cooldown(key: str, seconds: int) -> bool:
     now = time.time()
     if now - _cooldowns.get(key, 0) < seconds:
         return False
-    
+
     _cooldowns[key] = now
     return True
