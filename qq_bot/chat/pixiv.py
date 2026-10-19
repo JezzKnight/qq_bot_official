@@ -130,8 +130,11 @@ async def fetch_pixiv_images(
     refresh_tokens: list[str] | None = None,
 ) -> list[bytes] | str:
     """返回图片字节列表；失败时返回给用户看的错误文本。"""
+    # 兼容 day-r18 这类连字符写法；官方 mode 用下划线
+    mode = (mode or "").strip().lower().replace("-", "_")
     if mode not in ALLOWED_MODES:
-        return "无效参数"
+        available = ", ".join(sorted(ALLOWED_MODES - {""}))
+        return f"无效参数。可用类型：{available}"
     mode = mode or "day"
     cache_dir = Path(cache_dir)
     now = datetime.now(ZoneInfo("Asia/Shanghai"))
