@@ -126,10 +126,6 @@ async def query_chat_history(date: str, limit: int = 200) -> str:
         return "❌ 无法确定当前会话上下文。"
 
     parts = scope.split("/")
-    if parts[0] == "groups":
-        session_id = f"group_{parts[1]}"
-    else:
-        session_id = f"user_{parts[1]}"
 
     # 3. 查询 PG（群聊按群维度、私聊按线程维度）
     try:

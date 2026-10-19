@@ -8,9 +8,6 @@
 #   name          模型名，/model 指令用它切换
 #   base_url      OpenAI 兼容端点（会自动补 /chat/completions）
 #   api_key_env   该模型取哪个环境变量作为密钥
-#   platform      可选：bigmodel / deepseek / siliconflow / local / openai（缺省按 base_url 推断）
-#   capabilities  可选：supports_vision / supports_video / supports_tools /
-#                 supports_reasoning / context_window（缺省走内置默认表与名称启发式）
 #   params        可选：temperature / max_tokens / timeout / connect_timeout
 # ─────────────────────────────────────────────────────────────
 
@@ -27,70 +24,20 @@ models:
   - name: glm-5.3-flash
     base_url: https://open.bigmodel.cn/api/coding/paas/v4/
     api_key_env: GLM_API_KEY
-    platform: bigmodel
     params:
       temperature: 1.0
       max_tokens: 16384
-    capabilities:
-      supports_vision: true
-      supports_video: true
-      supports_tools: true
-      supports_reasoning: true
-
   - name: glm-5.3
     base_url: https://open.bigmodel.cn/api/coding/paas/v4/
     api_key_env: GLM_API_KEY
-    platform: bigmodel
-    capabilities:
-      supports_tools: true
-
   # ── DeepSeek ──
   - name: deepseek-v4-flash
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
-    platform: deepseek
     params:
       max_tokens: 8192
-    capabilities:
-      supports_vision: false
-      supports_video: false
-      supports_tools: true
-      supports_reasoning: true
-
   - name: deepseek-v4-pro
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
-    platform: deepseek
     params:
       max_tokens: 8192
-    capabilities:
-      supports_vision: false
-      supports_video: false
-      supports_tools: true
-      supports_reasoning: true
-
-# ── 本地视觉模型（image_understand 工具用；base_url 留空 = 关闭）──
-vision:
-  base_url: ""
-  model: ""
-  api_key_env: VISION_API_KEY
-  params:
-    temperature: 0.2
-    max_tokens: 1024
-    timeout: 120
-
-# ── 图像编辑（edit_image 工具 / 群聊改图）──
-image_edit:
-  base_url: https://dashscope.aliyuncs.com
-  model: qwen-image-3.0
-  api_key_env: IMAGE_EDIT_API_KEY
-  params:
-    timeout: 180
-    n: 1
-    size: ""                # 留空 = 按被修改原图的尺寸自动推算
-    prompt_extend: true
-    enable_thinking: false  # 默认关：开启会显著拖长生成时间
-    negative_prompt: ""
-    cooldown_seconds: 30
-    max_per_user_per_day: 10
-    prompt_refine: true

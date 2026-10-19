@@ -81,11 +81,11 @@ def init_logging() -> None:
         root.setLevel(logging.INFO)
 
         # 这些 logger 已被挂上专属 LoguruHandler（uvicorn 系来自 nonebot 传入
-        # uvicorn.run 的 LOGGING_CONFIG，apscheduler 来自 nonebot_plugin_apscheduler），
+        # uvicorn.run 的 LOGGING_CONFIG），
         # 但均未关闭传播，记录会继续上浮到 root 被再次桥接 → 控制台/文件双打。
         # 关闭传播使每条记录只经一条链路进入 loguru。
         # 注：uvicorn 启动时的 dictConfig 不含 propagate 键，不会覆盖此处预设值。
-        for name in ("uvicorn.error", "uvicorn.access", "apscheduler"):
+        for name in ("uvicorn.error", "uvicorn.access"):
             logging.getLogger(name).propagate = False
 
         # 全量运行日志：按日期分文件（{time} 在轮转时替换为当天日期）

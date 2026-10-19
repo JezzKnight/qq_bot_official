@@ -20,12 +20,9 @@ _FULL_GROUP = os.getenv("QQ_GROUP_FULL_MESSAGES", "false").strip().lower() in {
 }
 
 QQ_CAPS = PlatformCaps(
-    can_list_members=False,
     can_see_all_group_messages=_FULL_GROUP,
     can_send_image=True,
-    can_active_message=False,
     max_reply_parts=4,
-    can_progress_messages=False,
 )
 
 
@@ -114,7 +111,6 @@ def from_event(event: Any, *, reply: ReplyTarget) -> Incoming:
     ).strip()
 
     return Incoming(
-        platform="qq",
         user_key=user_key,
         group_key=str(group_openid) if group_openid else None,
         display_name=_display_name(author, user_key),

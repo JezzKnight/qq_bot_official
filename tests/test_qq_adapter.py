@@ -92,7 +92,6 @@ def test_group_event_is_normalized() -> None:
         message=[FakeSeg("text", {"text": " 你好 "})],
     )
     incoming = from_event(event, reply=FakeReply())
-    assert incoming.platform == "qq"
     assert incoming.user_key == "openid-user-123456"
     assert incoming.group_key == "group-openid-1"
     assert incoming.is_group is True

@@ -2,11 +2,9 @@
 from .batch_search import batch_search
 from .context import (
     AsyncSender,
-    InteractionPayload,
     SearchTracker,
     current_edited_images,
     current_images,
-    current_interaction,
     current_pending_sticker,
     current_scope,
     current_search_tracker,
@@ -27,12 +25,10 @@ from .web_search import web_search_by_tavily
 __all__ = [
     "TOOLS",
     "AsyncSender",
-    "InteractionPayload",
     "SearchTracker",
     "batch_search",
     "current_edited_images",
     "current_images",
-    "current_interaction",
     "current_pending_sticker",
     "current_scope",
     "current_search_tracker",

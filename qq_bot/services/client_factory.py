@@ -5,16 +5,9 @@
 调用方拿到的仍是带 ``.chat()`` 的 OpenAI 兼容客户端，签名与旧版一致。
 """
 
-from qq_bot.ai.capabilities import CAPABILITY_FIELDS, ModelCapabilities
 from qq_bot.ai.image_edit_client import ImageEditClient
-from qq_bot.ai.model_gateway import ModelGateway, ModelProfile
-from qq_bot.ai.model_registry import (
-    ImageEditSpec,
-    ModelParams,
-    ModelSpec,
-    VisionSpec,
-    get_registry,
-)
+from qq_bot.ai.model_gateway import ModelGateway
+from qq_bot.ai.model_registry import ImageEditSpec, ModelParams, get_registry
 from qq_bot.ai.openai_client import OpenaiCompatClient
 
 # 全局网关：按 (base_url, api_key, timeout, connect_timeout) 维护连接池
@@ -45,22 +38,8 @@ def get_model_params(model: str) -> ModelParams:
     return get_registry().params_for(model)
 
 
-def get_vision_spec() -> VisionSpec:
-    return get_registry().vision
-
-
 def get_image_edit_spec() -> ImageEditSpec:
     return get_registry().image_edit
-
-
-def _to_explicit_capabilities(spec: ModelSpec | None) -> ModelCapabilities | None:
-    """把 yaml 能力字段映射为显式能力层；全为空时返回 None（走内置默认表）。"""
-    if spec is None or not spec.capabilities:
-        return None
-    fields = {f: spec.capabilities.get(f) for f in CAPABILITY_FIELDS}
-    if all(v is None for v in fields.values()):
-        return None
-    return ModelCapabilities(**fields)
 
 
 # ── 客户端获取 ───────────────────────────────────────────────
@@ -82,18 +61,6 @@ async def get_client_for_model(model: str) -> OpenaiCompatClient:
         default_model=model,
         timeout=params.timeout,
         connect_timeout=params.connect_timeout,
-    )
-
-
-async def get_vision_client() -> OpenaiCompatClient:
-    """取本地视觉模型客户端（复用统一网关，独立端点/密钥/超时）。"""
-    vision = get_registry().vision
-    return _gateway.get_client(
-        vision.base_url,
-        vision.api_key,
-        default_model=vision.model,
-        timeout=vision.params.timeout,
-        connect_timeout=vision.params.connect_timeout,
     )
 
 
@@ -123,17 +90,6 @@ async def get_image_edit_client() -> ImageEditClient:
     )
     state.signature = signature
     return state.client
-
-
-def get_model_profile(model: str) -> ModelProfile:
-    """解析模型画像（平台归属 + 能力元数据）。"""
-    spec = get_registry().resolve(model)
-    return _gateway.get_profile(
-        model,
-        base_url=spec.base_url if spec else "",
-        explicit=_to_explicit_capabilities(spec),
-        platform=spec.platform if spec else None,
-    )
 
 
 async def close_all() -> None:

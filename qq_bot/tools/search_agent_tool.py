@@ -1,5 +1,4 @@
 
-from nonebot import get_plugin_config
 
 from qq_bot.agents.search_agent import SearchAgent
 from qq_bot.services import token_usage
@@ -7,11 +6,9 @@ from qq_bot.services.client_factory import (
     default_model_name,
     get_client_for_model,
 )
-from qq_bot.services.config import AiChatConfig
 from qq_bot.tools.registry import TOOLS, get_tools_schema, register_tool
 
 # 子 Agent 可用工具：两轮硬上限结构下，第 1 轮 batch_search、第 2 轮按需 web_fetch。
-# save_digest 已移出——3 次调用内没有摘要回收的收益空间。
 SEARCH_AGENT_TOOLS = ("batch_search", "web_fetch")
 
 
@@ -34,7 +31,6 @@ SEARCH_AGENT_TOOLS = ("batch_search", "web_fetch")
 )
 async def search_agent(task: str, model: str | None = None):
     # 在此处构造client然后注入
-    config = get_plugin_config(AiChatConfig)
     if model is None:
         model = default_model_name()
     client = await get_client_for_model(model)

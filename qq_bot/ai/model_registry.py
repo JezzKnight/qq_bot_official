@@ -21,17 +21,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_FILE = "model.yaml"
 ENV_CONFIG_PATH = "AI_MODEL_CONFIG"
 
-# capabilities 允许的字段（与 ModelCapabilities 一一对应）
-_CAPABILITY_FIELDS = frozenset(
-    {
-        "supports_vision",
-        "supports_video",
-        "supports_tools",
-        "supports_reasoning",
-        "context_window",
-    }
-)
-
 
 class ModelConfigError(Exception):
     """model.yaml 缺失或格式非法。"""
@@ -59,31 +48,11 @@ class ModelSpec:
     name: str
     base_url: str
     api_key_env: str = ""
-    platform: str | None = None
-    params: ModelParams = field(default_factory=ModelParams)
-    capabilities: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def api_key(self) -> str:
-        return _env(self.api_key_env)
-
-
-@dataclass(frozen=True)
-class VisionSpec:
-    """本地视觉模型（image_understand 工具）。base_url 为空即关闭。"""
-
-    base_url: str = ""
-    model: str = ""
-    api_key_env: str = ""
     params: ModelParams = field(default_factory=ModelParams)
 
     @property
     def api_key(self) -> str:
         return _env(self.api_key_env)
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.base_url.strip() and self.model.strip())
 
 
 @dataclass(frozen=True)
@@ -113,14 +82,13 @@ class ImageEditSpec:
 
 
 class ModelRegistry:
-    """model.yaml 的内存视图：按名查模型、取参数、暴露视觉与图像编辑配置。"""
+    """model.yaml 的内存视图：按名查模型、取参数、暴露图像编辑配置。"""
 
     def __init__(
         self,
         *,
         models: list[ModelSpec],
         default_model: str,
-        vision: VisionSpec,
         image_edit: ImageEditSpec,
         path: Path,
     ) -> None:
@@ -129,7 +97,6 @@ class ModelRegistry:
         self.default_model_name = default_model or (
             self._order[0] if self._order else ""
         )
-        self.vision = vision
         self.image_edit = image_edit
         self.path = path
 
@@ -158,17 +125,6 @@ def _as_params(raw: dict[str, Any] | None, base: ModelParams) -> ModelParams:
         timeout=float(raw.get("timeout", base.timeout)),
         connect_timeout=float(raw.get("connect_timeout", base.connect_timeout)),
     )
-
-
-def _as_capabilities(raw: dict[str, Any] | None) -> dict[str, Any]:
-    """校验能力字段名，避免拼错后被静默忽略。"""
-    if not raw:
-        return {}
-    unknown = set(raw) - _CAPABILITY_FIELDS
-    if unknown:
-        msg = f"capabilities 含未知字段: {sorted(unknown)}"
-        raise ModelConfigError(msg)
-    return dict(raw)
 
 
 def _resolve_path(path: str | Path | None) -> Path:
@@ -218,23 +174,9 @@ def load_registry(path: str | Path | None = None) -> ModelRegistry:
                 name=name,
                 base_url=str(item["base_url"]).strip(),
                 api_key_env=str(item.get("api_key_env") or "").strip(),
-                platform=(
-                    str(item["platform"]).strip()
-                    if item.get("platform")
-                    else None
-                ),
                 params=_as_params(item.get("params"), base),
-                capabilities=_as_capabilities(item.get("capabilities")),
             )
         )
-
-    raw_vision = data.get("vision") or {}
-    vision = VisionSpec(
-        base_url=str(raw_vision.get("base_url") or "").strip(),
-        model=str(raw_vision.get("model") or "").strip(),
-        api_key_env=str(raw_vision.get("api_key_env") or "").strip(),
-        params=_as_params(raw_vision.get("params"), base),
-    )
 
     raw_ie = data.get("image_edit") or {}
     image_edit = ImageEditSpec(
@@ -255,7 +197,6 @@ def load_registry(path: str | Path | None = None) -> ModelRegistry:
     return ModelRegistry(
         models=specs,
         default_model=str(data.get("default_model") or "").strip(),
-        vision=vision,
         image_edit=image_edit,
         path=cfg_path,
     )

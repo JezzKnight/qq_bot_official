@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -43,7 +42,6 @@ from qq_bot.tools import (
     SearchTracker,
     current_edited_images,
     current_images,
-    current_interaction,
     current_pending_sticker,
     current_scope,
     current_search_tracker,
@@ -53,7 +51,6 @@ from qq_bot.tools import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
 
     from qq_bot.platform.ports import Incoming
 
@@ -92,7 +89,6 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     incoming: Incoming,
     *,
     config: Any,
-    bootstrap_members: Callable[[], Awaitable[bool]] | None = None,
 ) -> str:
     """执行一轮对话并返回最终回复文本。"""
     sender_name = incoming.display_name or "未知用户"
@@ -129,25 +125,10 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
             group_id=gid,
             config=get_memory_config(),
         )
-        if is_group and gid is not None and (incoming.card or incoming.nickname):
-            try:
-                await memory.refresh_member_name(
-                    group_id=gid,
-                    user_id=uid,
-                    card=incoming.card or "",
-                    nickname=incoming.nickname or "",
-                )
-            except Exception:
-                logger.debug("成员名片刷新失败", exc_info=True)
 
     system_part = prompt_service.get_system_prompt()
     if is_group:
         member_info = await members_xml(memory, gid) if memory is not None else None
-        if not member_info and bootstrap_members is not None:  # noqa: SIM102
-            if await bootstrap_members():
-                member_info = (
-                    await members_xml(memory, gid) if memory is not None else None
-                )
         if not member_info:
             member_info = "暂无群成员信息"
         group_part = prompt_service.get_group_prompt(member_info=member_info)
@@ -158,7 +139,6 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
                     gid,
                     uid,
                     incoming.text,
-                    self_id=incoming.self_key or "",
                     glossary_enabled=config.glossary_enabled,
                 )
             except Exception as exc:  # noqa: BLE001 —— 注入失败只降级
@@ -226,13 +206,9 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
         "query_chat_history",
         "set_my_name",
     ]
-    if incoming.caps.can_active_message:
-        tool_names.extend(["schedule_reminder", "cancel_reminder"])
     # 没有表情目录（如 QQ 模式未同步）或平台不能发图时不暴露相关工具
     if sticker_catalog and incoming.caps.can_send_image:
         tool_names.append("send_sticker")
-    if is_group and incoming.caps.can_active_message:
-        tool_names.append("interact_with_member")
     if get_image_edit_spec().enabled and incoming.caps.can_send_image:
         tool_names.append("edit_image")
 
@@ -283,59 +259,17 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
                     }
                     current_search_tracker.set(tracker)
                     try:
-                        if incoming.caps.can_progress_messages:
-                            await incoming.reply.text("正在找寻相关信息")
-                        search_start = time.monotonic()
                         result = await tool["func"](**args)
-                        search_time = time.monotonic() - search_start
                     finally:
                         current_search_tracker.set(None)
-                    if (
-                        incoming.caps.can_progress_messages
-                        and tracker["tavily_error_count"] > 0
-                        and not tracker["tavily_success"]
-                    ):
-                        await incoming.reply.text(
-                            f"⚠️ Tavily 异常，失败 {tracker['tavily_error_count']} 次"
-                        )
-                    if (
-                        incoming.caps.can_progress_messages
-                        and tracker["search_rounds"] > 0
-                    ):
-                        rounds = tracker["search_rounds"]
-                        await incoming.reply.text(
-                            f"已完成检索，共执行 {rounds} 轮，"
-                            f"耗时 {search_time:.1f} 秒"
-                        )
             else:
                 result = await tool["func"](**args)
 
             messages.append(
                 ChatMessage(role="tool", content=result, tool_call_id=tc["id"])
             )
-        if current_interaction.get() is not None:
-            break
     else:
         final_content = FALLBACK_TEXT
-
-    interaction = current_interaction.get()
-    if interaction is not None:
-        opener = interaction["opener_text"]
-        await persist_turn(
-            memory,
-            thread_id=thread_id,
-            group_id=gid,
-            sender_id=uid,
-            sender_name=sender_name,
-            user_text=f"{identity_tag}\n{incoming.text}",
-            assistant_text=opener,
-            usage=usage_context.snapshot(),
-            model=model_name,
-            schedule=_compression_scheduler(incoming),
-        )
-        current_interaction.set(None)
-        await incoming.reply.mention(str(interaction["target_uid"]), opener)
-        await incoming.reply.finish()
 
     edited_images = current_edited_images.get()
     current_edited_images.set(None)
@@ -347,6 +281,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
 
     pending_sticker = current_pending_sticker.get()
     current_pending_sticker.set(None)
+    logger.info("TURN persist start")
     await persist_turn(
         memory,
         thread_id=thread_id,
@@ -360,6 +295,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
         sticker=pending_sticker[0] if pending_sticker is not None else None,
         schedule=_compression_scheduler(incoming),
     )
+    logger.info("TURN persist done")
 
     if is_group:
         max_parts = incoming.reply.max_parts

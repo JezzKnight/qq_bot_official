@@ -4,6 +4,7 @@
 启用方式：配置 `.env` 的 `QQ_BOTS` 后运行 `./run_bot.sh`。
 """
 
+import asyncio
 import logging
 import os
 
@@ -101,7 +102,9 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
 
     config = get_plugin_config(AiChatConfig)
     try:
-        await run_turn(incoming, config=config)
+        await asyncio.wait_for(run_turn(incoming, config=config), timeout=120)
+    except asyncio.TimeoutError:
+        logger.error("QQ turn timeout after 120s")
     except Exception:
         logger.exception("QQ 官方路径处理失败")
         await bot.send(event, MessageSegment.text("我这边卡了一下 稍后再试"))

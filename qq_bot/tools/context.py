@@ -16,13 +16,6 @@ class SearchTracker(TypedDict):
     search_rounds: int  # 累计检索轮数（每调用一次 web_search 加一）
 
 
-class InteractionPayload(TypedDict):
-    """委托式主动互动成功后的载荷：由 interact_with_member 工具写入、handler 收尾消费"""
-
-    target_uid: str  # 目标成员 A 的 QQ 号
-    opener_text: str  # @A 开场正文（不含 @、不含 id，由代码构造 @）
-
-
 current_scope: contextvars.ContextVar[str] = contextvars.ContextVar("current_scope")
 current_sender_name: contextvars.ContextVar[str] = contextvars.ContextVar(
     "current_sender_name"
@@ -32,9 +25,6 @@ current_send_msg: contextvars.ContextVar[AsyncSender | None] = contextvars.Conte
 )
 current_search_tracker: contextvars.ContextVar[SearchTracker | None] = (
     contextvars.ContextVar("current_search_tracker", default=None)
-)
-current_interaction: contextvars.ContextVar[InteractionPayload | None] = (
-    contextvars.ContextVar("current_interaction", default=None)
 )
 # 当前消息携带的图片（handler 下载后写入）：给工具提供"按序号取图"的句柄，
 # 否则工具拿不到图——主模型只看到内容，看不到可引用的图片对象（note §61.2 第 3 条）。

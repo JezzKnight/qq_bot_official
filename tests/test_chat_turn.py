@@ -92,7 +92,6 @@ def _async_value(value):
 
 def _incoming(reply: FakeReply, *, group: str | None = None) -> Incoming:
     return Incoming(
-        platform="qq",
         user_key="openid-12345",
         group_key=group,
         display_name="测试用户",
@@ -101,9 +100,6 @@ def _incoming(reply: FakeReply, *, group: str | None = None) -> Incoming:
         message_id="1",
         reply=reply,
         caps=QQ_CAPS,
-        self_key="999",
-        card="",
-        nickname="测试用户",
     )
 
 
@@ -137,13 +133,10 @@ def test_compression_skipped_without_full_group_access() -> None:
     incoming = dataclasses.replace(
         _incoming(FakeReply()),
         caps=PlatformCaps(
-            can_list_members=False,
-            can_see_all_group_messages=False,
+                can_see_all_group_messages=False,
             can_send_image=True,
-            can_active_message=False,
-            max_reply_parts=4,
-            can_progress_messages=False,
-        ),
+                max_reply_parts=4,
+            ),
     )
     assert turn_mod._compression_scheduler(incoming) is None
 
@@ -152,12 +145,9 @@ def test_compression_enabled_with_full_group_access() -> None:
     incoming = dataclasses.replace(
         _incoming(FakeReply()),
         caps=PlatformCaps(
-            can_list_members=False,
-            can_see_all_group_messages=True,
+                can_see_all_group_messages=True,
             can_send_image=True,
-            can_active_message=False,
-            max_reply_parts=4,
-            can_progress_messages=False,
-        ),
+                max_reply_parts=4,
+            ),
     )
     assert turn_mod._compression_scheduler(incoming) is not None

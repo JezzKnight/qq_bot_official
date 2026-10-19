@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from nonebot.adapters.qq import MessageSegment
 
 logger = logging.getLogger(__name__)
+
+SEND_TIMEOUT = 25.0
 
 
 class QQReply:
@@ -24,6 +27,15 @@ class QQReply:
         self._event = event
 
     async def _send(self, seg: Any, *, passive: bool) -> None:
+        logger.info("QQ send start passive=%s", passive)
+        try:
+            await asyncio.wait_for(self._send_once(seg, passive=passive), SEND_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error("QQ send timeout after %ss passive=%s", SEND_TIMEOUT, passive)
+            raise
+        logger.info("QQ send done passive=%s", passive)
+
+    async def _send_once(self, seg: Any, *, passive: bool) -> None:
         if passive:
             await self._bot.send(self._event, seg)
             return

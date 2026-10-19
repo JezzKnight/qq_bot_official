@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -24,19 +23,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _user_memories(repo: PgRepository, uid: int, gid: int | None) -> list[dict]:
+async def _user_memories(repo: PgRepository, uid: str, gid: str | None) -> list[dict]:
     rows = await repo.list_memories(
         user_id=uid,
         group_id=gid,
         fresh_within_days=get_memory_config().retention.memory_stale_days,
     )
     return [
-        r for r in rows if r["scope_kind"] == "user" and int(r["scope_id"]) == uid
+        r for r in rows if r["scope_kind"] == "user" and r["scope_id"] == uid
     ]
 
 
 async def _glossary_block(
-    repo: PgRepository, gid: int, user_input: str, *, enabled: bool
+    repo: PgRepository, gid: str, user_input: str, *, enabled: bool
 ) -> str | None:
     if not enabled:
         return None
@@ -50,7 +49,7 @@ async def _glossary_block(
 
 
 async def _mention_section(
-    repo: PgRepository, gid: int, matches: list
+    repo: PgRepository, gid: str, matches: list
 ) -> tuple[list[str], list[str]]:
     """被提及成员的记忆块 + 指代解析块。"""
     blocks: list[str] = []
@@ -69,15 +68,14 @@ async def _mention_section(
 
 
 async def build_memory_injection(
-    group_id: int | str,
-    current_user_id: int | str,
+    group_id: str,
+    current_user_id: str,
     user_input: str,
-    self_id: str | None = None,
     *,
     glossary_enabled: bool = True,
 ) -> tuple[str | None, list[str]]:
     """返回 (注入文本, 命中的成员 uid 列表，含当前发言人本人)。"""
-    gid, uid = int(group_id), int(current_user_id)
+    gid, uid = group_id, current_user_id
     repo = await get_memory()
     if repo is None:
         return None, []
@@ -92,7 +90,7 @@ async def build_memory_injection(
             group_id=gid,
             fresh_within_days=get_memory_config().retention.memory_stale_days,
         )
-        if r["scope_kind"] == "group" and int(r["scope_id"]) == gid
+        if r["scope_kind"] == "group" and r["scope_id"] == gid
     ]
     if group_rows:
         blocks.append(format_memory_block("## 群公共记忆", pick_memories(group_rows)))
@@ -111,9 +109,6 @@ async def build_memory_injection(
         blocks.append(glossary)
 
     excluded = {uid}
-    if self_id:
-        with contextlib.suppress(ValueError):
-            excluded.add(int(self_id))
     matches, ambiguous = await resolve_mentions(
         repo, group_id=gid, text=user_input, exclude_uids=excluded
     )
@@ -128,9 +123,9 @@ async def build_memory_injection(
     return "\n\n".join(blocks), injected
 
 
-async def build_private_injection(user_id: int | str) -> str | None:
+async def build_private_injection(user_id: str) -> str | None:
     """私聊：注入本人长期记忆。"""
-    uid = int(user_id)
+    uid = user_id
     repo = await get_memory()
     if repo is None:
         return None
