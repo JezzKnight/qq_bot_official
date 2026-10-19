@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────
+# 记忆子系统配置（可安全入库：不含密钥）
+# 数据库连接沿用 .env 的 PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD
+# 设计见 docs/memory-design.md，实施见 docs/memory-implementation-plan.md
+# ─────────────────────────────────────────────────────────────
+
+backend: postgres        # postgres | sqlite（P1–P3 期间保留 sqlite 以便回滚）
+
+short_term:
+  group_window: 20       # ② 群原始窗口：他人最近 M 条
+  thread_window: 12      # ③ 个人线程窗口：本人最近 K 条
+
+compression:
+  trigger_turns: 30      # 唯一触发器：未摘要的群 user 消息达到 N 条
+  summary_max_tokens: 500
+  model: deepseek-v4-flash   # 引用 model.yaml 中的模型名（低成本）
+  full_rebuild_every: 10     # 每 N 次增量做一次全量重建
+
+budget:                  # 各层注入预算（token）
+  long_term: 800
+  group_summary: 600
+  group_window: 1500
+  thread_window: 2500
+
+retention:
+  raw_days: 30           # L1 原文保留天数
+  summary_days: 365      # L2 摘要保留天数
+  memory_stale_days: 180 # L3 超过该天数未确认视为失效（不注入）

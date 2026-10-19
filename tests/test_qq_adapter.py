@@ -1,0 +1,155 @@
+"""QQ 官方适配器：事件归一化与回复通道。"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from qq_bot.platform.qqbot.incoming import QQ_CAPS, from_event
+from qq_bot.platform.qqbot.reply import QQReply
+
+
+@dataclass
+class FakeSeg:
+    type: str
+    data: dict = field(default_factory=dict)
+
+
+class FakeMessage(list):
+    pass
+
+
+class FakeEvent:
+    def __init__(  # noqa: PLR0913
+        self,
+        *,
+        group_openid: str | None = None,
+        member_openid: str = "openid-user-123456",
+        user_openid: str = "openid-friend-654321",
+        username: str | None = None,
+        message: list[FakeSeg] | None = None,
+        msg_id: str = "m1",
+    ) -> None:
+        self.group_openid = group_openid
+        self.author = type(
+            "Author",
+            (),
+            {
+                "member_openid": member_openid,
+                "user_openid": user_openid,
+                "username": username,
+            },
+        )()
+        self.id = msg_id
+        self._message = FakeMessage(message or [])
+
+    def get_message(self) -> FakeMessage:
+        return self._message
+
+
+class FakeReply:
+    max_parts = 4
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    async def text(self, content: str) -> None:
+        self.sent.append(("text", content))
+
+    async def mention(self, user_key: str, _content: str) -> None:
+        self.sent.append(("mention", user_key))
+
+    async def image(self, _data: bytes, name: str = "") -> None:
+        self.sent.append(("image", name))
+
+    async def finish(self) -> None:
+        return
+
+
+class FakeBot:
+    def __init__(self) -> None:
+        self.sent: list[object] = []
+        self.active: list[object] = []
+
+    async def send(self, _event, message) -> None:
+        self.sent.append(message)
+
+    async def send_to_group(self, group_openid, message) -> None:  # noqa: ARG002
+        self.active.append(message)
+
+    async def send_to_c2c(self, openid, message) -> None:  # noqa: ARG002
+        self.active.append(message)
+
+
+def test_group_event_is_normalized() -> None:
+    event = FakeEvent(
+        group_openid="group-openid-1",
+        username="群友甲",
+        message=[FakeSeg("text", {"text": " 你好 "})],
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.platform == "qq"
+    assert incoming.user_key == "openid-user-123456"
+    assert incoming.group_key == "group-openid-1"
+    assert incoming.is_group is True
+    assert incoming.display_name == "群友甲"
+    assert incoming.text == "你好"
+    assert incoming.caps == QQ_CAPS
+    assert incoming.caps.max_reply_parts == 4
+
+
+def test_display_name_falls_back_to_openid_tail() -> None:
+    event = FakeEvent(group_openid="g", username=None)
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.display_name == "用户123456"
+
+
+def test_c2c_event_has_no_group() -> None:
+    event = FakeEvent(group_openid=None, username="鱼片")
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.group_key is None
+    assert incoming.user_key == "openid-friend-654321"
+
+
+def test_quoted_message_becomes_prefix() -> None:
+    event = FakeEvent(
+        group_openid="g",
+        message=[FakeSeg("text", {"text": "这是啥"})],
+    )
+    event.reply = type(
+        "Quoted",
+        (),
+        {
+            "content": "原话",
+            "attachments": [type("Att", (), {"content_type": "image/png"})()],
+            "author": type("A", (), {"username": "小红"})(),
+        },
+    )()
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.text.startswith('[用户引用了 小红 的消息："原话"，[1 张图片]]')
+    assert incoming.text.endswith("这是啥")
+
+
+def test_image_segment_becomes_media_ref() -> None:
+    event = FakeEvent(
+        group_openid="g",
+        message=[
+            FakeSeg("image", {"url": "https://x/a.png"}),
+            FakeSeg("text", {"text": "看图"}),
+        ],
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert [(m.kind, m.url) for m in incoming.images] == [
+        ("image", "https://x/a.png")
+    ]
+
+
+async def test_first_segment_is_passive_rest_are_active() -> None:
+    bot = FakeBot()
+    reply = QQReply(bot, FakeEvent(group_openid="g"))
+    await reply.mention("openid-user-123456", "第一段")
+    await reply.text("第二段")
+    await reply.image(b"bytes", "s.png")
+    await reply.finish()
+    # 首条被动回复（平台自动关联原消息），后续与表情走主动消息，不带 @
+    assert len(bot.sent) == 1
+    assert len(bot.active) == 2

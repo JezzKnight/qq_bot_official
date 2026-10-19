@@ -1,0 +1,60 @@
+"""术语库保存工具：AI 在对话中遇到特殊词汇时调用，把词义存入当前群术语库。
+
+存储：PostgreSQL 的 glossary_terms 表（group_id + term_key 唯一）。
+"""
+from qq_bot.memory.naming import normalize
+from qq_bot.plugins.ai_chat.memory_writing import get_memory
+
+from .context import current_scope
+from .registry import register_tool
+
+
+@register_tool(
+    name="save_glossary",
+    description=(
+        "将对话中出现的特定词汇（网络热梗、互联网黑话、特殊用语、生僻简称）"
+        "及其含义保存到当前群的术语库。\n\n"
+        "## 何时调用\n"
+        "当对话中出现上述特定词汇，且你已确认或查到了它的准确含义时调用。"
+        "保存后，后续对话中该词出现时系统会自动注入其含义，帮助理解。\n\n"
+        "## 词义描述硬性要求\n"
+        "definition 必须以第三人称客观视角描述该词汇的含义，"
+        "只陈述该词在特定语境中的意思，"
+        "不要代入任何主观成分（禁止添加个人评价如『我觉得』『这个很搞笑』，禁止揣测使用者意图）。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "term": {
+                "type": "string",
+                "description": "该词汇本身，如 '我造密码'",
+            },
+            "definition": {
+                "type": "string",
+                "description": "该词汇的第三人称客观释义",
+            },
+        },
+        "required": ["term", "definition"],
+    },
+)
+async def save_glossary(term: str, definition: str) -> str:
+    """保存术语释义到当前群的术语库"""
+    scope = current_scope.get() or ""
+    if not scope.startswith("groups/"):
+        return "术语库仅支持群聊使用"
+    clean = term.strip()
+    key = normalize(clean)
+    if not key:
+        return "术语不能为空"
+
+    repo = await get_memory()
+    if repo is None:
+        return "记忆库暂时不可用，术语未保存"
+    action = await repo.upsert_glossary_term(
+        group_id=int(scope.split("/")[1]),
+        term=clean,
+        term_key=key,
+        definition=definition.strip(),
+    )
+    label = "更新" if action == "updated" else "新增"
+    return f"已{label}术语：{clean}"

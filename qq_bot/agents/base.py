@@ -1,0 +1,154 @@
+# sub agent基类，这个是为sub agent进行抽象基类，为后续开发多类型sub agent写的基础架构
+
+import json
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+
+from ..ai.types import ChatMessage
+
+# token 用量记录器签名：接收 (prompt_tokens, cached_tokens, completion_tokens)
+UsageRecorder = Callable[[int, int, int], Awaitable[None]]
+
+
+def _replace_search_batch(
+    messages: list[ChatMessage],
+    batch_search_ids: set[str],
+) -> list[ChatMessage]:
+    """移除 batch_search 产生的原始搜索批次，释放后续轮次上下文空间。
+
+    摘要已由 save_digest 拦截写入为对应 tool 结果（role="tool"），保留在
+    messages 中维持合法工具调用链，不触发 DeepSeek 思考模式的校验。
+    """
+    drop_indices: set[int] = set()
+    for i, m in enumerate(messages):
+        if m.role == "assistant" and m.tool_calls:
+            m.tool_calls = [
+                tc for tc in m.tool_calls if tc["id"] not in batch_search_ids
+            ]
+            if not m.tool_calls:
+                drop_indices.add(i)
+        elif m.role == "tool" and m.tool_call_id in batch_search_ids:
+            drop_indices.add(i)
+
+    return [m for i, m in enumerate(messages) if i not in drop_indices]
+
+
+class BaseSubAgent(ABC):
+    """子Agent基类，本质是一个独立的LLM对话"""
+    agent_name: str
+    system_prompt: str
+    max_rounds: int
+
+
+    def __init__(
+        self,
+        client,
+        tools: list[dict],
+        model: str,
+        tool_registry: dict[str, dict],
+        usage_recorder: UsageRecorder | None = None,
+    ):
+        super().__init__()
+        self.model = model
+        self.client = client
+        self.tool_registry = tool_registry
+        self.tools: list[dict] = tools # subagent可用工具列表
+        self.usage_recorder = usage_recorder
+
+
+    @abstractmethod
+    def _build_task_prompt(self, **kwargs) -> str:
+        # 抽象方法中的逻辑应该留给子类实现，这里不应该写死处理方式，这里处理的是你定义工具时在工具描述中写的你所需要的参数
+        pass
+
+
+    async def execute(self, fail_msg: str, **kwargs) -> str:
+        # 获取prompt，构建消息列表，循环执行
+        messages = [ChatMessage(role = "system", content=self.system_prompt)]
+        # 获取user信息
+        content = self._build_task_prompt(**kwargs)
+        # 做一个空内容的兜底
+        if content:
+            messages.append(ChatMessage(role= "user", content=content))
+        # 记录 batch_search 调用的 tool_call_id，供 save_digest 替换时定位原始搜索批次
+        batch_search_ids: set[str] = set()
+        try:
+            for round_i in range(self.max_rounds):
+                # 末轮强制收卷：不再提供 tools，模型只能产出最终答复，
+                # 从结构上杜绝"最后一轮仍发起工具调用 → 白耗一轮 → 直接失败"的路径
+                round_tools = (
+                    self.tools if round_i < self.max_rounds - 1 else None
+                )
+                response = await self.client.chat(
+                    messages=messages,
+                    model=self.model,
+                    tools=round_tools
+                )
+                # 记录本次调用的 token 消耗
+                if self.usage_recorder is not None:
+                    await self.usage_recorder(
+                        response.prompt_tokens,
+                        response.cached_tokens,
+                        response.completion_tokens,
+                    )
+                # 如果没有工具调用，则直接返回内容
+                if not response.tool_calls:
+                    final_content = response.content or "AI暂时无法响应"
+                    break
+
+                assistant_msg = ChatMessage(
+                    role="assistant",
+                    tool_calls=response.tool_calls,
+                    reasoning_content=response.reasoning_content,
+                )
+                messages.append(assistant_msg)
+
+                print(f"Sub agent [INFO] 工具调用：{response.tool_calls}")
+                digest = False  # save_digest 是否被调用（用于触发批次回收）
+                for tc in response.tool_calls:
+                    func = tc["function"]
+                    name = func["name"]
+                    args = json.loads(func["arguments"])
+                    if name == "save_digest":
+                        # 摘要作为 save_digest 工具结果写入，保持消息链合法
+                        content = args.get("content") or ""
+                        messages.append(ChatMessage(
+                            role="tool",
+                            content="【检索进展摘要】\n" + content,
+                            tool_call_id=tc["id"],
+                        ))
+                        digest = True
+                        continue
+                    # 工具改为由构造器注入
+                    # tool = TOOLS[func["name"]]
+                    tool = self.tool_registry[name]
+                    result = await tool["func"](**args)
+
+                    messages.append(ChatMessage(
+                        role = "tool",
+                        content = result,
+                        tool_call_id = tc["id"],
+                    ))
+                    if name == "batch_search":
+                        batch_search_ids.add(tc["id"])
+
+                # 条件性阶段隔离：模型提交摘要后，用摘要替换原始 batch_search 批次
+                if digest:
+                    messages = _replace_search_batch(messages, batch_search_ids)
+                    batch_search_ids.clear()
+            else:
+                final_content = fail_msg
+                return final_content
+        
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] Sub Agent '{self.agent_name}' 执行异常: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            final_content = f"{fail_msg}（原因：{e}）"
+        
+        return final_content
+        
+
+
+            
+
