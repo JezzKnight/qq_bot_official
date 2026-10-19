@@ -115,6 +115,13 @@ async def _record_full_message(bot: Bot, event: QQMessageEvent) -> None:
     if getattr(author, "bot", False):
         return
     incoming = qq_from_event(event, reply=QQReply(bot, event))
+    # 临时诊断：确认全量消息里 @ 机器人时 mentions 到底长什么样
+    logger.info(
+        "GROUP_MESSAGE mentions=%r to_me=%r text=%r",
+        getattr(event, "mentions", None),
+        getattr(event, "to_me", None),
+        incoming.text,
+    )
     if not incoming.text and not incoming.images:
         return
     repo = await get_memory()
