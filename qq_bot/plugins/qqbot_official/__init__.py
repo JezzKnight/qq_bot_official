@@ -21,7 +21,12 @@ from nonebot.rule import Rule
 
 from qq_bot.chat.turn import run_turn
 from qq_bot.platform.identity import resolve_group, resolve_user
-from qq_bot.platform.qqbot.incoming import from_event as qq_from_event
+from qq_bot.platform.qqbot.incoming import (
+    from_event as qq_from_event,
+)
+from qq_bot.platform.qqbot.incoming import (
+    is_group_trigger,
+)
 from qq_bot.platform.qqbot.reply import QQReply
 from qq_bot.services.config import AiChatConfig
 from qq_bot.services.memory_compress import schedule_compress
@@ -41,7 +46,7 @@ __plugin_meta__ = PluginMetadata(
 
 
 async def _is_group_at(event: QQMessageEvent) -> bool:
-    return isinstance(event, GroupAtMessageCreateEvent)
+    return is_group_trigger(event)
 
 
 async def _is_c2c(event: QQMessageEvent) -> bool:
@@ -82,10 +87,8 @@ _FULL_GROUP = os.getenv("QQ_GROUP_FULL_MESSAGES", "false").strip().lower() in {
 
 
 async def _is_full_group(event: QQMessageEvent) -> bool:
-    """只处理非 @ 的普通群消息（@ 消息由 AI matcher 处理，避免重复落库）。"""
-    return isinstance(event, GroupMessageCreateEvent) and not isinstance(
-        event, GroupAtMessageCreateEvent
-    )
+    """只处理未 @ 机器人的普通群消息（@ 消息由 AI matcher 处理，避免重复落库）。"""
+    return isinstance(event, GroupMessageCreateEvent) and not is_group_trigger(event)
 
 
 group_matcher = on_message(rule=Rule(_is_group_at), priority=10, block=True)

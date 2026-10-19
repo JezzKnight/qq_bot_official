@@ -29,6 +29,35 @@ QQ_CAPS = PlatformCaps(
 )
 
 
+def mentions_me(event: Any) -> bool:
+    """事件是否 @ 了机器人。
+
+    全量消息模式下，@ 消息也会以 GROUP_MESSAGE_CREATE 到达，平台把 @ 放在
+    event.mentions 里（is_you=True），而不是单独的 GROUP_AT_MESSAGE_CREATE。
+    """
+    for mention in getattr(event, "mentions", None) or []:
+        if getattr(mention, "is_you", False):
+            return True
+    try:
+        message = event.get_message()
+    except Exception:  # noqa: BLE001 —— 没有消息体时按未 @ 处理
+        return False
+    return any(
+        seg.type == "mention_user" and seg.data.get("is_bot")
+        for seg in message
+    )
+
+
+def is_group_trigger(event: Any) -> bool:
+    """群消息是否应触发 AI：原生 @ 事件，或全量消息里 @ 了机器人。"""
+    event_type = getattr(event, "__type__", "")
+    if event_type == "GROUP_AT_MESSAGE_CREATE":
+        return True
+    if event_type == "GROUP_MESSAGE_CREATE":
+        return mentions_me(event)
+    return False
+
+
 def _display_name(author: Any, user_key: str) -> str:
     name = getattr(author, "username", None) if author is not None else None
     return name or f"用户{user_key[-6:]}"

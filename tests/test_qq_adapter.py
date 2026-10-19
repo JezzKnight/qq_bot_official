@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from qq_bot.platform.qqbot.incoming import QQ_CAPS, from_event
+from qq_bot.platform.qqbot.incoming import (
+    QQ_CAPS,
+    from_event,
+    is_group_trigger,
+    mentions_me,
+)
 from qq_bot.platform.qqbot.reply import QQReply
 
 
@@ -153,3 +158,50 @@ async def test_first_segment_is_passive_rest_are_active() -> None:
     # 首条被动回复（平台自动关联原消息），后续与表情走主动消息，不带 @
     assert len(bot.sent) == 1
     assert len(bot.active) == 2
+
+
+class FakeMention:
+    def __init__(self, *, is_you: bool) -> None:
+        self.is_you = is_you
+
+
+class FakeTypedEvent:
+    """只用于触发判定：用 __type__ 模拟适配器事件类型。"""
+
+    def __init__(
+        self, event_type: str, mentions: list[FakeMention] | None = None
+    ) -> None:
+        self.__type__ = event_type
+        self.mentions = mentions
+        self._message: list[FakeSeg] = []
+
+    def get_message(self) -> list[FakeSeg]:
+        return self._message
+
+
+def test_group_at_event_is_trigger() -> None:
+    assert is_group_trigger(FakeTypedEvent("GROUP_AT_MESSAGE_CREATE")) is True
+
+
+def test_full_message_with_is_you_is_trigger() -> None:
+    event = FakeTypedEvent(
+        "GROUP_MESSAGE_CREATE", mentions=[FakeMention(is_you=True)]
+    )
+    assert mentions_me(event) is True
+    assert is_group_trigger(event) is True
+
+
+def test_full_message_without_mention_is_not_trigger() -> None:
+    event = FakeTypedEvent(
+        "GROUP_MESSAGE_CREATE", mentions=[FakeMention(is_you=False)]
+    )
+    assert mentions_me(event) is False
+    assert is_group_trigger(event) is False
+
+
+def test_mention_segment_with_is_bot_is_trigger() -> None:
+    event = FakeTypedEvent("GROUP_MESSAGE_CREATE")
+    event._message = [
+        FakeSeg("mention_user", {"user_id": "bot-openid", "is_bot": True})
+    ]
+    assert mentions_me(event) is True
