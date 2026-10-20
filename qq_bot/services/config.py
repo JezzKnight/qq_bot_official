@@ -21,19 +21,6 @@ class AiChatConfig(BaseModel):
     # ── 频率控制 ──
     cooldown_seconds: int = 5                       # 单用户冷却秒数
 
-    # ── Pixiv访问控制 ──
-    proxy: str = ""
-    refresh_token: list[str] = []
-
-    @field_validator("refresh_token", mode="before")
-    @classmethod
-    def parse_refresh_token(cls, v: str | list) -> list:
-        """将环境变量中的 JSON 字符串解析为列表"""
-        if isinstance(v, str):
-            import json
-            return json.loads(v)
-        return v
-
     # ── WebSearch配置 ──
     Tavily_key: list[str] = []
 
