@@ -106,6 +106,17 @@ def from_event(event: Any, *, reply: ReplyTarget) -> Incoming:
         elif seg.type == "video" and url:
             media.append(MediaRef(kind="video", url=str(url)))
 
+    # 引用消息里的图片：event.reply.attachments 带 url，但不会出现在当前消息段里；
+    # 追加到 media，下载后一起交给视觉模型，文字前缀仍保留“[N 张图片]”说明来源。
+    quoted = getattr(event, "reply", None)
+    for item in getattr(quoted, "attachments", None) or []:
+        content_type = str(getattr(item, "content_type", "") or "")
+        url = getattr(item, "url", None)
+        if content_type.startswith("image/") and url:
+            quoted_url = str(url)
+            if all(ref.url != quoted_url for ref in media):
+                media.append(MediaRef(kind="image", url=quoted_url))
+
     text = _quoted_prefix(event) + "".join(
         seg.data.get("text", "") for seg in segments if seg.type == "text"
     ).strip()

@@ -32,6 +32,7 @@ class FakeEvent:
         user_openid: str = "openid-friend-654321",
         username: str | None = None,
         message: list[FakeSeg] | None = None,
+        reply: object | None = None,
         msg_id: str = "m1",
     ) -> None:
         self.group_openid = group_openid
@@ -45,6 +46,7 @@ class FakeEvent:
             },
         )()
         self.id = msg_id
+        self.reply = reply
         self._message = FakeMessage(message or [])
 
     def get_message(self) -> FakeMessage:
@@ -204,3 +206,43 @@ def test_mention_segment_with_is_bot_is_trigger() -> None:
         FakeSeg("mention_user", {"user_id": "bot-openid", "is_bot": True})
     ]
     assert mentions_me(event) is True
+
+
+class FakeAttachment:
+    def __init__(self, content_type: str, url: str | None) -> None:
+        self.content_type = content_type
+        self.url = url
+
+
+class FakeQuoted:
+    def __init__(self, content: str, attachments: list[FakeAttachment]) -> None:
+        self.content = content
+        self.attachments = attachments
+        self.author = type("Author", (), {"username": "阿强"})()
+
+
+def test_quoted_image_is_added_to_media() -> None:
+    event = FakeEvent(
+        group_openid="group-openid-1",
+        message=[FakeSeg("text", {"text": "看这个"})],
+        reply=FakeQuoted(
+            "原消息",
+            [FakeAttachment("image/jpeg", "https://example.com/quoted.jpg")],
+        ),
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.images[-1].kind == "image"
+    assert incoming.images[-1].url == "https://example.com/quoted.jpg"
+    assert "[1 张图片]" in incoming.text
+    assert "原消息" in incoming.text
+
+
+def test_quoted_image_without_url_is_ignored() -> None:
+    event = FakeEvent(
+        group_openid="group-openid-1",
+        message=[FakeSeg("text", {"text": "看这个"})],
+        reply=FakeQuoted("原消息", [FakeAttachment("image/jpeg", None)]),
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.images == []
+    assert "[1 张图片]" in incoming.text
