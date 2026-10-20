@@ -12,6 +12,15 @@ from nonebot.adapters.qq.exception import ActionFailed
 logger = logging.getLogger(__name__)
 
 SEND_TIMEOUT = 25.0
+
+
+def normalize_typing(text: str) -> str:
+    """大肥鱼的打字习惯：聊天正文里的中文逗号改成空格。
+
+    prompt 已经要求模型这样做；这里再兜一层，避免技术解释里偶尔漏掉。
+    只替换中文逗号，代码里的英文逗号不动。
+    """
+    return text.replace("，", " ")
 # QQ 开放平台：40034006 = 消息内容违规
 CONTENT_VIOLATION_CODE = 40034006
 CONTENT_VIOLATION_NOTICE = "发送图片失败，消息内容违规 QAQ"
@@ -65,15 +74,15 @@ class QQReply:
             await self._bot.send(self._event, seg)
 
     async def text(self, content: str) -> None:
-        await self._send(MessageSegment.text(content), passive=False)
+        await self._send(MessageSegment.text(normalize_typing(content)), passive=False)
 
     async def passive(self, content: str) -> None:
         """指令回复：单条被动回复，显示为对原消息的回复。"""
-        await self._send(MessageSegment.text(content), passive=True)
+        await self._send(MessageSegment.text(normalize_typing(content)), passive=True)
 
     async def mention(self, user_key: str, content: str) -> None:  # noqa: ARG002
         """首条回复：被动回复即可，平台会自动关联原消息。"""
-        await self._send(MessageSegment.text(content), passive=True)
+        await self._send(MessageSegment.text(normalize_typing(content)), passive=True)
 
     async def image(self, data: bytes, name: str = "") -> bool:
         """发送图片；内容违规时只提示一次并返回 False，调用方可提前结束批量发图。"""

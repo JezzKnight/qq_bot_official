@@ -8,7 +8,11 @@ from typing import Any
 from nonebot.adapters.qq.exception import ActionFailed
 from nonebot.drivers import Response
 
-from qq_bot.platform.qqbot.reply import CONTENT_VIOLATION_NOTICE, QQReply
+from qq_bot.platform.qqbot.reply import (
+    CONTENT_VIOLATION_NOTICE,
+    QQReply,
+    normalize_typing,
+)
 
 
 class FakeBot:
@@ -49,4 +53,11 @@ async def test_image_content_violation_sends_notice_once() -> None:
     assert await reply.image(b"fake-image", "b.png") is False
     assert bot.image_attempts == 1
     texts = [seg.data.get("text") for seg in bot.sent if seg.type == "text"]
-    assert texts == [CONTENT_VIOLATION_NOTICE]
+    assert texts == [normalize_typing(CONTENT_VIOLATION_NOTICE)]
+
+
+def test_normalize_typing_uses_space_for_chinese_comma() -> None:
+    assert normalize_typing("一点还不睡，明天上班不困成狗啊") == (
+        "一点还不睡 明天上班不困成狗啊"
+    )
+    assert normalize_typing("代码里的 foo(a, b) 不动") == "代码里的 foo(a, b) 不动"
