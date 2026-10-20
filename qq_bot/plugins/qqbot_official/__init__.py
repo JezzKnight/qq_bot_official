@@ -173,14 +173,36 @@ async def handle_cmd(bot: Bot, event: QQMessageEvent) -> None:
     await handle_command(event, reply, repo)
 
 
+async def _delete_model_panel(
+    bot: Bot, event: InteractionCreateEvent, panel_id: str
+) -> None:
+    """删掉按钮面板消息；失败只记日志，不影响切换结果。"""
+    try:
+        if event.group_openid:
+            await bot.delete_group_message(
+                group_openid=event.group_openid, message_id=panel_id
+            )
+        elif event.user_openid:
+            await bot.delete_c2c_message(
+                openid=event.user_openid, message_id=panel_id
+            )
+    except Exception:
+        logger.exception("删除模型面板失败 panel=%s", panel_id)
+
+
 @model_button_matcher.handle()
 async def handle_model_button(bot: Bot, event: InteractionCreateEvent) -> None:
     data = event.data.resolved.button_data or ""
     model = data.partition(":")[2]
+    panel_id = event.data.resolved.message_id
+
     if model not in get_registry().names():
         await bot.put_interaction(interaction_id=event.id, code=1)
+        if panel_id:
+            await _delete_model_panel(bot, event, panel_id)
         await bot.send(event, MessageSegment.text("这个模型不在了"))
         return
+
     if event.group_openid:
         session_id = f"group_{event.group_openid}"
     elif event.user_openid:
@@ -189,9 +211,13 @@ async def handle_model_button(bot: Bot, event: InteractionCreateEvent) -> None:
         await bot.put_interaction(interaction_id=event.id, code=1)
         await bot.send(event, MessageSegment.text("无法确定当前会话"))
         return
+
     set_session_model(session_id, model)
-    # 先 ACK，避免客户端一直 loading；再发确认消息
+    # 先 ACK，避免客户端一直 loading
     await bot.put_interaction(interaction_id=event.id, code=0)
+    # 面板是挂在消息上的，平台不会自动收起；主动删掉原消息
+    if panel_id:
+        await _delete_model_panel(bot, event, panel_id)
     await bot.send(event, MessageSegment.text(f"已切换到 {model}"))
 
 
