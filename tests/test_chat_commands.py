@@ -20,3 +20,16 @@ def test_parse_chinese_alias() -> None:
 def test_non_command_returns_empty() -> None:
     assert parse_command("你好") == ("", "")
     assert parse_command("/") == ("", "")
+
+
+def test_model_keyboard_buttons() -> None:
+    from qq_bot.platform.qqbot.model_panel import build_model_keyboard
+
+    keyboard = build_model_keyboard(["deepseek-v4-flash", "glm-5.3"], "glm-5.3")
+    rows = keyboard.content.rows
+    assert rows is not None
+    assert len(rows) == 2
+    labels = [row.buttons[0].render_data.label for row in rows if row.buttons]
+    assert labels == ["deepseek-v4-flash", "glm-5.3 ✓"]
+    data = [row.buttons[0].action.data for row in rows if row.buttons]
+    assert data == ["model:deepseek-v4-flash", "model:glm-5.3"]

@@ -8,17 +8,19 @@ import asyncio
 import logging
 import os
 
-from nonebot import get_driver, get_plugin_config, on_message
+from nonebot import get_driver, get_plugin_config, on_message, on_notice
 from nonebot.adapters.qq import (
     Bot,
     C2CMessageCreateEvent,
     GroupMessageCreateEvent,
+    InteractionCreateEvent,
     MessageSegment,
 )
 from nonebot.adapters.qq.event import QQMessageEvent
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
+from qq_bot.ai.model_registry import get_registry
 from qq_bot.chat.turn import run_turn
 from qq_bot.platform.qqbot.incoming import (
     from_event as qq_from_event,
@@ -30,6 +32,7 @@ from qq_bot.platform.qqbot.reply import QQReply
 from qq_bot.services.config import AiChatConfig
 from qq_bot.services.memory_compress import schedule_compress
 from qq_bot.services.memory_writing import get_memory
+from qq_bot.services.session_store import set_session_model
 from qq_bot.services.sticker_sync import sync_stickers
 
 from .commands import handle_command
@@ -64,6 +67,14 @@ async def _is_command(event: QQMessageEvent) -> bool:
 
 
 command_matcher = on_message(rule=Rule(_is_command), priority=5, block=True)
+
+
+async def _is_model_button(event: InteractionCreateEvent) -> bool:
+    data = event.data.resolved.button_data or ""
+    return data.startswith("model:")
+
+
+model_button_matcher = on_notice(rule=Rule(_is_model_button), priority=5, block=True)
 driver = get_driver()
 
 
@@ -104,7 +115,7 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
     try:
         await asyncio.wait_for(run_turn(incoming, config=config), timeout=120)
     except asyncio.TimeoutError:
-        logger.error("QQ turn timeout after 120s")
+        logger.exception("QQ turn timeout after 120s")
     except Exception:
         logger.exception("QQ 官方路径处理失败")
         await bot.send(event, MessageSegment.text("我这边卡了一下 稍后再试"))
@@ -160,6 +171,24 @@ async def handle_cmd(bot: Bot, event: QQMessageEvent) -> None:
     reply = QQReply(bot, event)
     # 不在这里拦截 None：/reboot 不依赖记忆库，仍然可用
     await handle_command(event, reply, repo)
+
+
+@model_button_matcher.handle()
+async def handle_model_button(bot: Bot, event: InteractionCreateEvent) -> None:
+    data = event.data.resolved.button_data or ""
+    model = data.partition(":")[2]
+    if model not in get_registry().names():
+        await bot.send(event, MessageSegment.text("这个模型不在了"))
+        return
+    if event.group_openid:
+        session_id = f"group_{event.group_openid}"
+    elif event.user_openid:
+        session_id = f"user_{event.user_openid}"
+    else:
+        await bot.send(event, MessageSegment.text("无法确定当前会话"))
+        return
+    set_session_model(session_id, model)
+    await bot.send(event, MessageSegment.text(f"已切换到 {model}"))
 
 
 @group_matcher.handle()

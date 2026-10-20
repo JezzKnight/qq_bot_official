@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -14,12 +15,15 @@ from qq_bot.ai.model_registry import get_registry
 from qq_bot.chat.commands import parse_command
 from qq_bot.chat.usage import format_usage, memory_stats_line
 from qq_bot.platform.qqbot.incoming import from_event as qq_from_event
+from qq_bot.platform.qqbot.model_panel import build_model_keyboard
 from qq_bot.services.client_factory import default_model_name
 from qq_bot.services.config import AiChatConfig
 from qq_bot.services.session_store import get_session_model, set_session_model
 
 if TYPE_CHECKING:
     from qq_bot.platform.qqbot.reply import QQReply
+
+logger = logging.getLogger(__name__)
 
 HELP_TEXT = """能用这些指令
 /help 显示本帮助
@@ -104,10 +108,19 @@ async def _model(event: Any, reply: QQReply, arg: str) -> None:
 
     if arg in ("", "list"):
         current = get_session_model(session_id, default_model_name())
-        lines = ["可用模型："]
-        lines.extend(f"  {name}{' ←当前' if name == current else ''}" for name in names)
-        lines.append("输入 /model <模型名> 切换")
-        await reply.passive("\n".join(lines))
+        try:
+            await reply.markdown_panel(
+                f"**切换模型**\n当前：{current}\n点下面的按钮切换",
+                build_model_keyboard(names, current),
+            )
+        except Exception:
+            logger.exception("模型面板发送失败，回退文字列表")
+            lines = ["可用模型："]
+            lines.extend(
+                f"  {name}{' ←当前' if name == current else ''}" for name in names
+            )
+            lines.append("输入 /model <模型名> 切换")
+            await reply.passive("\n".join(lines))
         return
 
     if arg not in names:

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nonebot.adapters.qq import MessageSegment
 from nonebot.adapters.qq.exception import ActionFailed
+
+if TYPE_CHECKING:
+    from nonebot.adapters.qq.models.common import MessageKeyboard
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +86,11 @@ class QQReply:
     async def mention(self, user_key: str, content: str) -> None:  # noqa: ARG002
         """首条回复：被动回复即可，平台会自动关联原消息。"""
         await self._send(MessageSegment.text(normalize_typing(content)), passive=True)
+
+    async def markdown_panel(self, content: str, keyboard: MessageKeyboard) -> None:
+        """发送 QQ 官方的 Markdown + 按钮面板（msg_type=2）。"""
+        message = MessageSegment.markdown(content) + MessageSegment.keyboard(keyboard)
+        await self._send(message, passive=True)
 
     async def image(self, data: bytes, name: str = "") -> bool:
         """发送图片；内容违规时只提示一次并返回 False，调用方可提前结束批量发图。"""
