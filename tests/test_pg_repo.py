@@ -95,3 +95,11 @@ async def test_budget_trims_oldest() -> None:
     msgs = [ChatMessage(role="user", content="字" * 100) for _ in range(10)]
     trimmed = trim_by_budget(msgs, budget=250, keep_tail=2)
     assert len(trimmed) == 2
+
+
+async def test_clear_group_summaries(repo) -> None:
+    await repo.insert_summary(
+        group_id="G1", content="summary", covers_from=1, covers_to=2
+    )
+    assert await repo.clear_group_summaries("G1") == 1
+    assert await repo.count_summaries("G1") == 0

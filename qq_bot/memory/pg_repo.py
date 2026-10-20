@@ -190,6 +190,13 @@ class PgRepository:
         )
         return int(value or 0)
 
+    async def clear_group_summaries(self, group_id: str) -> int:
+        """清空某群摘要，返回删除条数（管理员 /reset group 用）。"""
+        result = await self.pool.execute(
+            "DELETE FROM group_summaries WHERE group_id = $1", group_id
+        )
+        return int(result.split()[-1])
+
     async def latest_summary(self, group_id: str) -> str | None:
         return await self.pool.fetchval(
             """

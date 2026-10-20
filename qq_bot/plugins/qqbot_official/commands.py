@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 HELP_TEXT = """能用这些指令
 /help 显示本帮助
 /reset 清除你自己的对话记忆
+/reset group 清空本群摘要（仅管理员）
+/reset all 清空本群摘要和你的记忆（仅管理员）
 /usage 查看今日 token 用量
 /model [模型名] 查看或切换模型
 /whoami 查看机器人记录的你的信息
@@ -49,7 +51,7 @@ async def handle_command(
         return
 
     if name in ("reset", "clear", "重置对话", "清除记忆"):
-        await _reset(event, reply, repo)
+        await _reset(event, reply, repo, args)
         return
 
     if name in ("usage", "用量", "今日用量", "今日token"):
@@ -71,13 +73,41 @@ async def handle_command(
     await reply.passive(f"没有 /{name} 这个指令 发 /help 看看")
 
 
-async def _reset(event: Any, reply: QQReply, repo: Any) -> None:
+def _admin_openids() -> set[str]:
+    config = get_plugin_config(AiChatConfig)
+    return {x.strip() for x in config.admin_openids.split(",") if x.strip()}
+
+
+async def _reset(
+    event: Any, reply: QQReply, repo: Any, args: str = ""
+) -> None:
     if repo is None:
         await reply.passive("记忆库暂时不可用 稍后再试")
         return
     incoming = qq_from_event(event, reply=reply)
     uid = incoming.user_key
     gid = incoming.group_key
+    mode = args.strip().lower()
+
+    if mode in ("group", "群", "群摘要", "all", "全部"):
+        if gid is None:
+            await reply.passive("这个操作只能在群聊里用")
+            return
+        if uid not in _admin_openids():
+            await reply.passive("你没有权限执行此操作")
+            return
+        deleted_summary = await repo.clear_group_summaries(gid)
+        if mode in ("all", "全部"):
+            thread_id = await repo.ensure_thread("group_member", gid, uid)
+            deleted_thread = await repo.clear_thread(thread_id)
+            await reply.passive(
+                f"已清空本群摘要（{deleted_summary} 条）和你的对话记忆"
+                f"（{deleted_thread} 条）"
+            )
+        else:
+            await reply.passive(f"已清空本群摘要（{deleted_summary} 条）")
+        return
+
     thread_id = await repo.ensure_thread(
         "group_member" if gid is not None else "private", gid, uid
     )
@@ -133,8 +163,7 @@ async def _model(event: Any, reply: QQReply, arg: str) -> None:
 
 async def _reboot(event: Any, reply: QQReply) -> None:
     incoming = qq_from_event(event, reply=reply)
-    config = get_plugin_config(AiChatConfig)
-    admins = {x.strip() for x in config.admin_openids.split(",") if x.strip()}
+    admins = _admin_openids()
     if not admins:
         await reply.passive("未配置 ADMIN_OPENIDS，无法执行重启")
         return

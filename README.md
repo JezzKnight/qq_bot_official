@@ -8,7 +8,7 @@ QQ 开放平台（官方 API）专用的 AI 群聊/私聊机器人。基于 None
 - 群聊 @ 机器人 / 私聊对话，支持多段回复（仅首条被动回复带引用）
 - 长期记忆（PostgreSQL）：个人线程、群摘要、语义记忆、术语库、称呼
 - 工具：联网搜索、表情包、记忆读写、历史查询
-- 指令：`/help`、`/reset`、`/usage`、`/model`、`/whoami`、`/reboot`（管理员）
+- 指令：`/help`、`/reset`、`/reset group`（管理员）、`/reset all`（管理员）、`/usage`、`/model`、`/whoami`、`/reboot`（管理员）
 - 群主开启"接收全量消息"后，可记录普通群消息用于群上下文
 
 ## 快速开始
