@@ -1,38 +1,44 @@
-# 表情包清单：文件放在 data/data/ai_chat/stickers/
-# 名称用于模型调用 send_sticker(name=...)，description 写"什么时候该发"
-# 未在清单中出现的文件会以文件名为名称自动导入；exclude 里的文件不导入
-
-exclude:
-  - online.jpg   # 上线通知用图，不是表情包
-  - what.jpg     # 空回复兜底图，不是表情包
+# 表情包清单：文件放在 data/data/qqbot_official/stickers/
+# 名称用于模型调用 send_sticker(name=...)，description 写“什么时候该发”
+# 文件名保持不变，避免路径失效；名称/标签/描述在这里维护，启动时同步到 PG
 
 stickers:
-  - file: wuyu.jpg
-    name: 无语
-    tags: [无语, 无奈, 沉默]
-    description: 想表达无语、无奈、懒得回应的情绪时使用；例如用户反复发送无意义重复内容。
+  - file: dance.gif
+    name: 跳舞
+    tags: [跳舞, 营业, 表演, 得意]
+    description: 想跳舞、营业、被要求表演才艺，或者单纯心情很好想扭两下时使用。
 
-  - file: tiaodou.gif
-    name: 挑逗
-    tags: [帮助后, 俏皮, 得意]
-    description: 用户求助时，在给完建议/帮助之后发送，作为俏皮的收尾。
+  - file: ee.gif
+    name: 等饭
+    tags: [饿, 饭, 大白饭, 等饭, ee]
+    description: 端着碗等饭吃、表达饿了/馋了、催饭时使用；也可以配合“大白饭”出现。
 
   - file: enh.jpg
     name: 震惊
-    tags: [震惊, 惊讶, 难以置信]
-    description: 想表达震惊、难以置信时使用。
-
-  - file: dance.gif
-    name: 跳舞
-    tags: [跳舞, 才艺, 表演]
-    description: 用户明确要求看 bot 跳舞时使用。
+    tags: [震惊, 啊, 不敢相信, 问号]
+    description: 听到离谱消息、看到逆天发言、被吓到或想表达“啊？”时使用。
 
   - file: lai.gif
-    name: 来
-    tags: [索要, 催促, 互动]
-    description: 想从用户那里要更多信息/资源时使用；同时在回复文字里喊「X来！X来！」（例如「token来！token来！」）。
+    name: 过来
+    tags: [过来, 伸手, 叫你来, 欠揍]
+    description: 招手叫对方过来、催人、挑衅式邀请时使用；适合配“过来啊”“你过来”。
 
-  - file: ee.gif
-    name: 想吃
-    tags: [食物, 馋, 想吃, ee]
-    description: 和用户讨论食物、bot 表达想吃时使用。
+  - file: online.jpg
+    name: 最强
+    tags: [最强, 得意, 炫耀, 自信]
+    description: 自夸、被夸、装高手、嘴硬逞强时使用；带“最强”大字，适合得意场合。
+
+  - file: tiaodou.gif
+    name: 戳戳
+    tags: [戳, 挑逗, 别戳, 欠揍]
+    description: 想戳对方、被戳、挑逗或欠欠地招惹一下时使用；不要用于冒犯或骚扰。
+
+  - file: what.jpg
+    name: 干嘛猫
+    tags: [干嘛, 追问, 无语, 猫, 梗图]
+    description: 对方反复问“在干嘛”“到底要干嘛”，或者被追问到无语时使用；这是“干嘛猫”梗图。
+
+  - file: wuyu.jpg
+    name: 无语
+    tags: [无语, 沉默, 懒得理, 喝茶]
+    description: 想表达无语、沉默、懒得回应，或者看戏喝茶时使用。

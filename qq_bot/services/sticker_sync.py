@@ -17,7 +17,7 @@ from .memory_writing import get_memory
 
 logger = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _MANIFEST = _REPO_ROOT / "stickers.yaml"
 class _State:
     catalog: str = ""
