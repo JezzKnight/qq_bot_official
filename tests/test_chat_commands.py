@@ -31,5 +31,7 @@ def test_model_keyboard_buttons() -> None:
     assert len(rows) == 2
     labels = [row.buttons[0].render_data.label for row in rows if row.buttons]
     assert labels == ["deepseek-v4-flash", "glm-5.3 ✓"]
-    data = [row.buttons[0].action.data for row in rows if row.buttons]
-    assert data == ["model:deepseek-v4-flash", "model:glm-5.3"]
+    actions = [row.buttons[0].action for row in rows if row.buttons]
+    assert [a.data for a in actions] == ["model:deepseek-v4-flash", "model:glm-5.3"]
+    assert all(a.type == 1 for a in actions)
+    assert all(a.permission.type == 2 for a in actions)

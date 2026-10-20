@@ -8,6 +8,7 @@ from nonebot.adapters.qq.models.common import (
     InlineKeyboard,
     InlineKeyboardRow,
     MessageKeyboard,
+    Permission,
     RenderData,
 )
 
@@ -24,7 +25,12 @@ def build_model_keyboard(names: list[str], current: str) -> MessageKeyboard:
                         render_data=RenderData(
                             label=label, visited_label=label, style=1
                         ),
-                        action=Action(type=2, data=f"model:{name}"),
+                        action=Action(
+                            type=1,
+                            permission=Permission(type=2),
+                            data=f"model:{name}",
+                            unsupport_tips="当前客户端不支持按钮",
+                        ),
                     )
                 ]
             )

@@ -178,6 +178,7 @@ async def handle_model_button(bot: Bot, event: InteractionCreateEvent) -> None:
     data = event.data.resolved.button_data or ""
     model = data.partition(":")[2]
     if model not in get_registry().names():
+        await bot.put_interaction(interaction_id=event.id, code=1)
         await bot.send(event, MessageSegment.text("这个模型不在了"))
         return
     if event.group_openid:
@@ -185,9 +186,12 @@ async def handle_model_button(bot: Bot, event: InteractionCreateEvent) -> None:
     elif event.user_openid:
         session_id = f"user_{event.user_openid}"
     else:
+        await bot.put_interaction(interaction_id=event.id, code=1)
         await bot.send(event, MessageSegment.text("无法确定当前会话"))
         return
     set_session_model(session_id, model)
+    # 先 ACK，避免客户端一直 loading；再发确认消息
+    await bot.put_interaction(interaction_id=event.id, code=0)
     await bot.send(event, MessageSegment.text(f"已切换到 {model}"))
 
 
