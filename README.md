@@ -30,7 +30,7 @@ QQ | Bot <AppID> connected
 
 | 键 | 说明 |
 |---|---|
-| `QQ_BOTS` | 机器人 AppID/AppSecret/intent（JSON）|
+| `QQ_BOTS` | 机器人 AppID/AppSecret/intent（JSON；按钮面板需要 `interaction:true`）|
 | `QQ_IS_SANDBOX` | 是否沙盒 |
 | `QQ_GROUP_FULL_MESSAGES` | 群主开启全量消息后设 true |
 | `PG_*` | PostgreSQL 连接 |
