@@ -22,6 +22,7 @@ from nonebot.rule import Rule
 
 from qq_bot.ai.model_registry import get_registry
 from qq_bot.chat.turn import run_turn
+from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.platform.qqbot.incoming import (
     from_event as qq_from_event,
 )
@@ -84,6 +85,10 @@ async def _sync_stickers_on_startup() -> None:
     try:
         count = await sync_stickers()
         logger.info("QQ 模式表情包库已同步：%s 个", count)
+        logger.info(
+            "群摘要触发阈值：%s 条",
+            get_memory_config().compression.trigger_turns,
+        )
     except Exception:
         logger.exception("QQ 模式表情包同步失败")
 

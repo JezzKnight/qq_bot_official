@@ -11,7 +11,7 @@ short_term:
   thread_window: 12      # ③ 个人线程窗口：本人最近 K 条
 
 compression:
-  trigger_turns: 30      # 唯一触发器：未摘要的群 user 消息达到 N 条
+  trigger_turns: 50      # 唯一触发器：未摘要的群 user 消息达到 N 条
   summary_max_tokens: 500
   model: deepseek-v4-flash   # 引用 model.yaml 中的模型名（低成本）
   full_rebuild_every: 10     # 每 N 次增量做一次全量重建
