@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
@@ -13,12 +12,10 @@ from nonebot import get_plugin_config
 
 from qq_bot.ai.model_registry import get_registry
 from qq_bot.chat.commands import parse_command
-from qq_bot.chat.pixiv import fetch_pixiv_images
 from qq_bot.chat.usage import format_usage, memory_stats_line
 from qq_bot.platform.qqbot.incoming import from_event as qq_from_event
 from qq_bot.services.client_factory import default_model_name
 from qq_bot.services.config import AiChatConfig
-from qq_bot.services.cooldown import check_cooldown
 from qq_bot.services.session_store import get_session_model, set_session_model
 
 if TYPE_CHECKING:
@@ -29,12 +26,11 @@ HELP_TEXT = """能用这些指令
 /reset 清除你自己的对话记忆
 /usage 查看今日 token 用量
 /model [模型名] 查看或切换模型
-/pixiv [类型] 随机来一张 Pixiv 排行榜图片
 /whoami 查看机器人记录的你的信息
 /reboot 重启机器人（仅管理员）"""
 
 
-async def handle_command(  # noqa: PLR0911
+async def handle_command(
     event: Any, reply: QQReply, repo: Any
 ) -> None:
     """解析并执行指令；未知指令给友好提示。"""
@@ -58,10 +54,6 @@ async def handle_command(  # noqa: PLR0911
 
     if name in ("model", "模型", "切换模型"):
         await _model(event, reply, args)
-        return
-
-    if name in ("pixiv", "图来", "来点色图"):
-        await _pixiv(event, reply, args)
         return
 
     if name in ("whoami", "我是谁"):
@@ -139,30 +131,6 @@ async def _reboot(event: Any, reply: QQReply) -> None:
     await reply.passive("正在重启...")
     await asyncio.sleep(0.5)
     os._exit(0)
-
-
-async def _pixiv(event: Any, reply: QQReply, arg: str) -> None:
-    incoming = qq_from_event(event, reply=reply)
-    config = get_plugin_config(AiChatConfig)
-    if not check_cooldown(f"pixiv_{incoming.user_key}", config.cooldown_seconds):
-        await reply.passive(f"太快啦 请 {config.cooldown_seconds} 秒后再试")
-        return
-
-    cache_dir = Path(os.getenv("PIXIV_CACHE_DIR", "data/data/ai_chat/pixiv"))
-    result = await fetch_pixiv_images(
-        arg.strip(),
-        cache_dir=cache_dir,
-        proxy=config.proxy,
-        refresh_tokens=config.refresh_token,
-    )
-    if isinstance(result, str):
-        await reply.passive(result)
-        return
-
-    await reply.passive(f"找到 {len(result)} 张")
-    for img in result:
-        if not await reply.image(img):
-            break
 
 
 async def _whoami(event: Any, reply: QQReply, repo: Any) -> None:
