@@ -1,12 +1,7 @@
 import contextvars
-from collections.abc import Awaitable, Callable
 from typing import TypedDict
 
 from qq_bot.ai.types import ImageData
-
-# async def send(text: str) -> None 的回调签名
-AsyncSender = Callable[[str], Awaitable[None]]
-
 
 class SearchTracker(TypedDict):
     """子 Agent 搜索过程中累积的 Tavily 调用状态"""
@@ -20,9 +15,6 @@ current_scope: contextvars.ContextVar[str] = contextvars.ContextVar("current_sco
 current_sender_name: contextvars.ContextVar[str] = contextvars.ContextVar(
     "current_sender_name"
 )
-current_send_msg: contextvars.ContextVar[AsyncSender | None] = contextvars.ContextVar(
-    "current_send_msg", default=None
-)
 current_search_tracker: contextvars.ContextVar[SearchTracker | None] = (
     contextvars.ContextVar("current_search_tracker", default=None)
 )
@@ -31,13 +23,6 @@ current_search_tracker: contextvars.ContextVar[SearchTracker | None] = (
 current_images: contextvars.ContextVar[list[ImageData] | None] = contextvars.ContextVar(
     "current_images", default=None
 )
-# 图像编辑产出：工具写入、handler 收尾发图。
-# None = 本轮尚未成功改过图（也用作"本轮已改过一次"的防重复调用哨兵）。
-current_edited_images: contextvars.ContextVar[list[ImageData] | None] = (
-    contextvars.ContextVar("current_edited_images", default=None)
-)
-
-
 # 本轮待发送的表情包 (name, bytes)：工具只入队，handler 在文字之后真正发出，
 # 保证"先说话再发表情"的顺序（工具执行时文字还没生成完）
 current_pending_sticker: contextvars.ContextVar[tuple[str, bytes] | None] = (

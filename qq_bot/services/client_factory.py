@@ -5,24 +5,13 @@
 调用方拿到的仍是带 ``.chat()`` 的 OpenAI 兼容客户端，签名与旧版一致。
 """
 
-from qq_bot.ai.image_edit_client import ImageEditClient
 from qq_bot.ai.model_gateway import ModelGateway
-from qq_bot.ai.model_registry import ImageEditSpec, ModelParams, get_registry
+from qq_bot.ai.model_registry import ModelParams, get_registry
 from qq_bot.ai.openai_client import OpenaiCompatClient
 
 # 全局网关：按 (base_url, api_key, timeout, connect_timeout) 维护连接池
 _EMPTY_REGISTRY_MSG = "model.yaml 未配置任何可用模型"
 _gateway = ModelGateway()
-
-
-class _ImageEditState:
-    """图像编辑客户端单例状态（避免 global 语句，同 token_usage 的写法）"""
-
-    client: ImageEditClient | None = None
-    signature: tuple[str, str, str] | None = None
-
-
-_image_edit_state = _ImageEditState()
 
 
 # ── 配置读取（统一走 model.yaml）────────────────────────────────
@@ -36,10 +25,6 @@ def default_model_name() -> str:
 def get_model_params(model: str) -> ModelParams:
     """取该模型的有效参数（已合并 defaults）。"""
     return get_registry().params_for(model)
-
-
-def get_image_edit_spec() -> ImageEditSpec:
-    return get_registry().image_edit
 
 
 # ── 客户端获取 ───────────────────────────────────────────────
@@ -64,38 +49,6 @@ async def get_client_for_model(model: str) -> OpenaiCompatClient:
     )
 
 
-async def get_image_edit_client() -> ImageEditClient:
-    """取图像编辑客户端（单例；关键配置变化时重建）。
-
-    图像编辑是独立协议 + 独立出口策略（境内直连、trust_env=False），
-    因此不复用 chat 连接池（见 note §61.2 / §70）。
-    """
-    spec = get_registry().image_edit
-    signature = (spec.base_url, spec.api_key, spec.model)
-    state = _image_edit_state
-    if state.client is not None and state.signature == signature:
-        return state.client
-    if state.client is not None:
-        await state.client.close()
-    state.client = ImageEditClient(
-        base_url=spec.base_url,
-        api_key=spec.api_key,
-        model=spec.model,
-        timeout=spec.params.timeout,
-        n=spec.n,
-        size=spec.size,
-        prompt_extend=spec.prompt_extend,
-        enable_thinking=spec.enable_thinking,
-        negative_prompt=spec.negative_prompt,
-    )
-    state.signature = signature
-    return state.client
-
-
 async def close_all() -> None:
     """关闭全部模型连接池（生命周期 shutdown 调用，幂等）。"""
     await _gateway.close_all()
-    if _image_edit_state.client is not None:
-        await _image_edit_state.client.close()
-        _image_edit_state.client = None
-        _image_edit_state.signature = None

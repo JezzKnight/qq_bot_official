@@ -55,41 +55,14 @@ class ModelSpec:
         return _env(self.api_key_env)
 
 
-@dataclass(frozen=True)
-class ImageEditSpec:
-    """图像编辑模型（edit_image 工具）。"""
-
-    base_url: str = "https://dashscope.aliyuncs.com"
-    model: str = ""
-    api_key_env: str = ""
-    params: ModelParams = field(default_factory=ModelParams)
-    n: int = 1
-    size: str = ""
-    prompt_extend: bool = True
-    enable_thinking: bool = False
-    negative_prompt: str = ""
-    cooldown_seconds: int = 30
-    max_per_user_per_day: int = 10
-    prompt_refine: bool = True
-
-    @property
-    def api_key(self) -> str:
-        return _env(self.api_key_env)
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.api_key and self.model.strip())
-
-
 class ModelRegistry:
-    """model.yaml 的内存视图：按名查模型、取参数、暴露图像编辑配置。"""
+    """model.yaml 的内存视图：按名查模型、取参数。"""
 
     def __init__(
         self,
         *,
         models: list[ModelSpec],
         default_model: str,
-        image_edit: ImageEditSpec,
         path: Path,
     ) -> None:
         self._models = {m.name: m for m in models}
@@ -97,7 +70,6 @@ class ModelRegistry:
         self.default_model_name = default_model or (
             self._order[0] if self._order else ""
         )
-        self.image_edit = image_edit
         self.path = path
 
     def names(self) -> list[str]:
@@ -178,26 +150,9 @@ def load_registry(path: str | Path | None = None) -> ModelRegistry:
             )
         )
 
-    raw_ie = data.get("image_edit") or {}
-    image_edit = ImageEditSpec(
-        base_url=str(raw_ie.get("base_url") or "https://dashscope.aliyuncs.com"),
-        model=str(raw_ie.get("model") or "").strip(),
-        api_key_env=str(raw_ie.get("api_key_env") or "").strip(),
-        params=_as_params(raw_ie.get("params"), base),
-        n=int(raw_ie.get("n", 1)),
-        size=str(raw_ie.get("size") or ""),
-        prompt_extend=bool(raw_ie.get("prompt_extend", True)),
-        enable_thinking=bool(raw_ie.get("enable_thinking", False)),
-        negative_prompt=str(raw_ie.get("negative_prompt") or ""),
-        cooldown_seconds=int(raw_ie.get("cooldown_seconds", 30)),
-        max_per_user_per_day=int(raw_ie.get("max_per_user_per_day", 10)),
-        prompt_refine=bool(raw_ie.get("prompt_refine", True)),
-    )
-
     return ModelRegistry(
         models=specs,
         default_model=str(data.get("default_model") or "").strip(),
-        image_edit=image_edit,
         path=cfg_path,
     )
 

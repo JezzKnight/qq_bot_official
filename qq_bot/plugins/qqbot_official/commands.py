@@ -1,4 +1,4 @@
-"""QQ 官方平台的指令处理（help / reset / usage / model）。"""
+"""QQ 官方平台的指令处理（help / reset / usage / model / whoami / reboot）。"""
 
 from __future__ import annotations
 

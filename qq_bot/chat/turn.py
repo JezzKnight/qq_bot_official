@@ -26,7 +26,6 @@ from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
     default_model_name,
     get_client_for_model,
-    get_image_edit_spec,
     get_model_params,
 )
 from qq_bot.services.dynamic_injection import (
@@ -40,12 +39,10 @@ from qq_bot.services.sticker_sync import catalog_text
 from qq_bot.tools import (
     TOOLS,
     SearchTracker,
-    current_edited_images,
     current_images,
     current_pending_sticker,
     current_scope,
     current_search_tracker,
-    current_send_msg,
     current_sender_name,
     get_tools_schema,
 )
@@ -103,7 +100,6 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     scope = f"groups/{gid}/{uid}" if is_group else f"private/{uid}"
     current_scope.set(scope)
     current_sender_name.set(sender_name)
-    current_send_msg.set(incoming.reply.text)
     current_pending_sticker.set(None)
     usage_context.reset()
 
@@ -209,8 +205,6 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     # 没有表情目录（如 QQ 模式未同步）或平台不能发图时不暴露相关工具
     if sticker_catalog and incoming.caps.can_send_image:
         tool_names.append("send_sticker")
-    if get_image_edit_spec().enabled and incoming.caps.can_send_image:
-        tool_names.append("edit_image")
 
     client = await get_client_for_model(model_name)
     search_agent_called = False
@@ -270,14 +264,6 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
             )
     else:
         final_content = FALLBACK_TEXT
-
-    edited_images = current_edited_images.get()
-    current_edited_images.set(None)
-    if edited_images:
-        for img in edited_images:
-            await incoming.reply.image(img.data)
-        if not final_content.strip() or final_content.startswith("AI暂时无法响应"):
-            final_content = "图已经改好了，看看效果吧"
 
     pending_sticker = current_pending_sticker.get()
     current_pending_sticker.set(None)
