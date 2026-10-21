@@ -30,8 +30,9 @@ _next_index: list[int] = [0]
 class TavilyClient:
     """Tavily 客户端，管理多 key 轮换"""
 
-    def __init__(self) -> None:
-        self._config: AiChatConfig | None = None
+    def __init__(self, config: AiChatConfig | None = None) -> None:
+        # 允许注入配置：离线基准脚本不需要 NoneBot driver，也能复用同一套 key 轮换。
+        self._config = config
 
     @property
     def config(self) -> AiChatConfig:
@@ -56,8 +57,7 @@ class TavilyClient:
         """核心请求逻辑：轮换 key，遇 432/433 切换重试"""
         keys = self._keys
         if not keys:
-            print("Tavily_key 未配置，跳过请求")
-            # logger.warning("Tavily_key 未配置，跳过请求")
+            logger.warning("Tavily_key 未配置，跳过请求")
             return {}
 
         async with httpx.AsyncClient(
@@ -73,50 +73,39 @@ class TavilyClient:
                         headers={**_HEADERS, "Authorization": f"Bearer {key}"},
                         json=payload,
                     )
-                    print(f"[DEBUG] Tavily {endpoint} 状态码: {response.status_code}")
-                    print(f"[DEBUG] Tavily {endpoint} 响应体: {response.text[:500]}")
+                    logger.debug("Tavily %s 状态码: %s", endpoint, response.status_code)
                 except httpx.ConnectTimeout:
                     # 网络问题，与 key 无关，直接失败
-                    # logger.warning("网络异常，Tavily %s 连接超时", endpoint)
-                    print("网络异常，Tavily %s 连接超时", endpoint)
+                    logger.warning("网络异常，Tavily %s 连接超时", endpoint)
                     return {}
                 except httpx.HTTPError as e:
-                    # logger.warning("Tavily %s 请求异常: %s", endpoint, e)
-                    print("Tavily %s 请求异常: %s", endpoint, e)
+                    logger.warning("Tavily %s 请求异常: %s", endpoint, e)
                     return {}
 
                 if response.status_code in KEY_SWITCH_STATUS_CODES:
                     # 该 key 配额/限流 → 永久跳过，换下一个重试
                     _next_index[0] = (idx + 1) % len(keys)
-                    # logger.warning(
-                    #     "Tavily key[%d] 返回 %d，切换到下一个 key",
-                    #     idx, response.status_code,
-                    # )
-                    print(
+                    logger.warning(
                         "Tavily key[%d] 返回 %d，切换到下一个 key",
-                        idx, response.status_code,
+                        idx,
+                        response.status_code,
                     )
                     continue
 
                 if not response.is_success:
                     # 其他错误（400/401/5xx 等），不视为 key 问题，直接失败
-                    # logger.warning(
-                    #     "Tavily %s 返回非预期状态码 %d: %s",
-                    #     endpoint, response.status_code, response.text[:200],
-                    # )
-                    print(
-                        "Tavily %s 返回非预期状态码 %d: %s",
-                        endpoint, response.status_code, response.text[:200],
+                    logger.warning(
+                        "Tavily %s 返回非预期状态码 %d",
+                        endpoint,
+                        response.status_code,
                     )
                     return {}
 
                 # 成功 → 记住该 key，下次优先尝试
                 _next_index[0] = idx
-                # logger.info("Tavily %s 成功, 使用 key[%d]", endpoint, idx)
-                print("Tavily %s 成功, 使用 key[%d]", endpoint, idx)
+                logger.debug("Tavily %s 成功, 使用 key[%d]", endpoint, idx)
                 return response.json()
 
         # 所有 key 均被限流/配额耗尽
-        # logger.error("Tavily 所有 key 均不可用 (%d 个)", len(keys))
-        print("Tavily 所有 key 均不可用 (%d 个)", len(keys))
+        logger.error("Tavily 所有 key 均不可用 (%d 个)", len(keys))
         return {}

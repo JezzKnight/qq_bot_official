@@ -195,7 +195,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     messages = trim_messages(messages, config.max_context_tokens)
 
     tool_names = [
-        "search_agent",
+        "search",
         "save_memory",
         "save_glossary",
         "recall_memory",
@@ -207,7 +207,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
         tool_names.append("send_sticker")
 
     client = await get_client_for_model(model_name)
-    search_agent_called = False
+    search_called = False
     final_content = FALLBACK_TEXT
     for _ in range(MAX_TOOL_ROUNDS):
         response = await client.chat(
@@ -237,15 +237,11 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
             func = tc["function"]
             tool = TOOLS[func["name"]]
             args = json.loads(func["arguments"])
-            if func["name"] == "search_agent":
-                if search_agent_called:
+            if func["name"] == "search":
+                if search_called:
                     result = "[系统提示] 本轮已搜索过，直接基于现有信息回答。"
                 else:
-                    search_agent_called = True
-                    args = {
-                        "model": model_name,
-                        "task": args.get("task", incoming.text),
-                    }
+                    search_called = True
                     tracker: SearchTracker = {
                         "tavily_success": False,
                         "tavily_error_count": 0,

@@ -7,7 +7,7 @@ QQ 开放平台（官方 API）专用的 AI 群聊/私聊机器人。基于 None
 
 - 群聊 @ 机器人 / 私聊对话，支持多段回复（仅首条被动回复带引用）
 - 长期记忆（PostgreSQL）：个人线程、群摘要、语义记忆、术语库、称呼
-- 工具：联网搜索、表情包、记忆读写、历史查询
+- 工具：联网搜索（quick/standard/deep）、表情包、记忆读写、历史查询
 - 指令：`/help`、`/reset`、`/reset group`（管理员）、`/reset all`（管理员）、`/usage`、`/model`、`/whoami`、`/reboot`（管理员）
 - 群主开启"接收全量消息"后，可记录普通群消息用于群上下文
 
@@ -45,6 +45,7 @@ qq_bot/
 ├── chat/               # 一轮对话核心、提示词、落库、用量
 ├── services/           # 模型工厂、记忆、表情同步、会话模型
 ├── tools/              # 工具注册与实现
+├── search/             # 搜索管线（规划/重排/reader/缓存）
 ├── memory/             # PostgreSQL 仓储、摘要、称呼、术语
 ├── ai/                 # 模型网关
 └── plugins/qqbot_official/  # 事件接线与指令

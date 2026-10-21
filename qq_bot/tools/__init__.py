@@ -14,6 +14,7 @@ from .registry import TOOLS, get_tools_schema, register_tool
 from .save_glossary import save_glossary
 from .save_memory import save_memory
 from .search_agent_tool import search_agent
+from .search_tool import search
 from .send_sticker import send_sticker
 from .set_my_name import set_my_name
 from .web_fetch import web_fetch_by_tavily
@@ -34,6 +35,7 @@ __all__ = [
     "register_tool",
     "save_glossary",
     "save_memory",
+    "search",
     "search_agent",
     "send_sticker",
     "set_my_name",
