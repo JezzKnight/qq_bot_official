@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-SearchMode = Literal["quick", "standard", "deep"]
+SearchMode = Literal["fast", "quick", "standard", "deep"]
 
 
 @dataclass(frozen=True, slots=True)

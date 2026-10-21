@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, cast
 
 from qq_bot.ai.types import ChatResponse
 from qq_bot.search.cache import SearchCache
+from qq_bot.search.deepseek import DeepSeekSearchProvider
 from qq_bot.search.pipeline import SearchPipeline, resolve_mode
 from qq_bot.search.planner import _parse_queries, infer_time_range
 from qq_bot.search.rerank import (
@@ -73,13 +74,57 @@ class FakeTavily:
         }
 
 
-def _pipeline(fake: FakeTavily, model: FakeModel | None = None) -> SearchPipeline:
+class FakeDeepSeek:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        count: int = 5,
+        need_content: bool = False,
+        ori_question: str = "",
+        time_range: str | None = None,
+    ) -> list[SearchItem]:
+        self.calls.append(
+            {
+                "query": query,
+                "count": count,
+                "need_content": need_content,
+                "ori_question": ori_question,
+                "time_range": time_range,
+            }
+        )
+        return [
+            SearchItem(
+                f"DeepSeek {index}",
+                f"https://ds.example/{index}",
+                "DeepSeek 摘要 包含赛程和日期",
+                score=0.8,
+                published_date="2026-10-21",
+                source="deepseek",
+            )
+            for index in range(3)
+        ]
+
+
+def _pipeline(
+    fake: FakeTavily,
+    model: FakeModel | None = None,
+    deepseek: FakeDeepSeek | None = None,
+) -> SearchPipeline:
     return SearchPipeline(
         cast("TavilyClient", fake),
         cast("OpenaiCompatClient", model or FakeModel()),
         "fake-model",
         cache=SearchCache(ttl_seconds=60),
+        fast_provider=cast("DeepSeekSearchProvider", deepseek),
     )
+
+
+def test_resolve_mode_accepts_fast() -> None:
+    assert resolve_mode("最近英雄联盟S赛赛程", "fast") == "fast"
 
 
 def test_resolve_mode_auto_upgrades_deep_question() -> None:
@@ -107,6 +152,15 @@ def test_dedupe_and_rerank_prefers_diverse_domains() -> None:
     assert len(ranked) == 2
     assert len({item.url for item in ranked}) == 2
     assert len({item.url.split("/")[2] for item in ranked}) == 2
+
+
+def test_build_context_hard_caps_length() -> None:
+    items = [
+        SearchItem(f"标题{i}", f"https://example.com/{i}", "正文" * 400)
+        for i in range(6)
+    ]
+    context = build_context(items, max_chars=600)
+    assert len(context) <= 600
 
 
 def test_build_context_numbers_sources() -> None:
@@ -200,3 +254,54 @@ def test_sort_by_recency_prefers_newest_and_keeps_undated_last() -> None:
     ]
     ordered = sort_by_recency(items)
     assert [item.title for item in ordered] == ["新", "旧", "无日期"]
+
+
+async def test_fast_mode_uses_deepseek_without_planner_or_reader() -> None:
+    fake_tavily = FakeTavily()
+    deepseek = FakeDeepSeek()
+    outcome = await _pipeline(fake_tavily, deepseek=deepseek).run(
+        "最近英雄联盟S赛赛程", mode="fast"
+    )
+    assert outcome.mode == "fast"
+    assert outcome.error == ""
+    assert outcome.items
+    assert fake_tavily.search_calls == []
+    assert fake_tavily.extract_calls == []
+    assert len(deepseek.calls) == 1
+    assert deepseek.calls[0]["need_content"] is False
+    assert "[S1]" in outcome.context
+    assert len(outcome.context) <= 3000
+
+
+async def test_fast_mode_cache_avoids_duplicate_deepseek_calls() -> None:
+    fake_tavily = FakeTavily()
+    deepseek = FakeDeepSeek()
+    pipeline = _pipeline(fake_tavily, deepseek=deepseek)
+    first = await pipeline.run("最近英雄联盟S赛赛程", mode="fast")
+    assert not first.cached
+    second = await pipeline.run("最近英雄联盟S赛赛程", mode="fast")
+    assert second.cached
+    assert len(deepseek.calls) == 1
+
+
+def test_deepseek_parse_uses_summary_by_default_and_content_when_requested() -> None:
+    data = {
+        "results": [
+            {
+                "title": "标题",
+                "url": "https://example.com/a",
+                "summary": "摘要",
+                "content": "正文",
+                "date": "2026-10-21",
+                "rerank_score": 0.9,
+                "site_name": "example",
+            }
+        ]
+    }
+    summary_item = DeepSeekSearchProvider._parse_results(data, need_content=False)[0]
+    content_item = DeepSeekSearchProvider._parse_results(data, need_content=True)[0]
+    assert summary_item.content == "摘要"
+    assert content_item.content == "正文"
+    assert summary_item.published_date == "2026-10-21"
+    assert summary_item.score == 0.9
+    assert summary_item.source == "example"

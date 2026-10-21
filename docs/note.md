@@ -72,3 +72,64 @@
 **复盘启示**
 - 让 LLM 输出结构化数据时，必须把“截断”当成正常失败模式，而不是异常；
 - 解析器要保守：宁可回退原问题，也不要把半截 JSON 当 query 发给搜索 API。
+
+## 2026-10-21 · 结论：DeepSeek 自研 Search API 是目前最快的搜索方案
+
+**背景**
+- 当前 improved 搜索链路平均 13.2s/题，主要成本是 planner + Tavily + reader。
+- 为评估 Tavily 之外的方案，实测了智谱 Web Search、Exa/Brave 公开基准，以及 DeepSeek 自研 Search API。
+
+**DeepSeek Search 实测（6 题，count=5，need_content=false，summary 拼 3800 字以内，回答用 deepseek-v4-flash）**
+- 搜索中位数 0.34s，最大 0.39s；6/6 成功，无空结果。
+- 端到端（搜索 + 回答）中位数 2.80s，最大 3.20s；总 token 13,307（平均 2,218/题）。
+- 对比当前 improved：13.2s / 34,365 token；约快 4.7×，token 省约 61%。
+- 质量：S 赛、油价、赛马娘卡池可用；动漫可用；天气因问题未指定地点只答深圳；赛马娘下月大赛诚实说明缺官方赛程。
+- Search API：`POST https://api.deepseek.com/v1/tools/search`，字段 `query/count/ori_question/need_content`；返回 `rerank_score/title/url/snippet/summary/content/date/authority`。
+- 计费：5 元/1000 次成功请求；Search 100 QPS，Fetch 25 QPS。
+- 同一 key 也可用 Responses API 的 `web_search` 工具（仅 deepseek-v4-pro）：单题 5.01s / 3,599 token，正确但比“Search API + flash”慢。
+
+**为什么重要**
+- 搜索阶段从秒级降到亚秒级，且 `summary` 本身已压缩，天然适合控制主模型上下文。
+- 不需要 planner 和 reader 就能达到 2.8s，说明之前的瓶颈主要是 Tavily + 多轮结构，不是模型回答。
+- `date`/`authority`/`rerank_score` 可直接用于时效排序和来源可信度，不需要再猜发布日期。
+- 建议新增 provider 抽象：DeepSeek Search 作为 fast 默认，Tavily/智谱作为 fallback；不要把供应商硬编码在 pipeline 里。
+
+**待办**
+- 尚未改代码；下一步可落 `DeepSeekSearchProvider` + `fast` 模式（单 query、summary、无 reader、context 3000 字）。
+## 2026-10-22 · 落地：DeepSeek Search 作为 fast 搜索
+
+**背景**
+- 上一轮实测 DeepSeek Search API：搜索中位 0.34s、端到端中位 2.80s，明显快于
+  Tavily + planner + reader 的 13.2s；决定把它接成默认 `fast` 模式。
+- fast 只做“单 query + summary”，不调用 planner/reader；standard/deep 继续走 Tavily。
+
+**改动**
+- 新增 `qq_bot/search/deepseek.py`：`DeepSeekSearchProvider` 封装
+  `POST https://api.deepseek.com/v1/tools/search`，默认 `count=5`、`need_content=false`，
+  把 `summary/date/rerank_score/site_name` 规范化为 `SearchItem`。
+- `qq_bot/search/pipeline.py` 新增 `fast` 分支：单 query、5 条结果、无 reader、
+  context 上限 3000 字；结果仍走去重重排与时效排序。
+- `qq_bot/tools/search_tool.py` 的 `search` 默认 `mode="fast"`，保留
+  `auto/quick/standard/deep`；provider 复用 `DEEPSEEK_API_KEY`。
+- 修复 `build_context()` 在截断时可能超出 `max_chars` 1 个字符的问题，并补回归测试。
+
+**6 题预演（生产代码 + `deepseek-v4-flash` 回答）**
+| 问题 | 耗时 | token | 结果 |
+| --- | ---: | ---: | --- |
+| 最近英雄联盟S赛赛程 | 4.42s | 2,613 | 给出 S16 入围赛/瑞士轮/淘汰赛/决赛时间 |
+| 最近新出了什么动漫 | 3.05s | 2,653 | 列出 2026 秋季新番与开播日 |
+| 下个月赛马娘大赛什么马强势 | 5.44s | 3,060 | 没查到 2026-11 可靠资料，明确说明 |
+| 这几天什么地方天气怎么样 | 3.52s | 2,494 | 只覆盖深圳，说明证据范围 |
+| 赛马娘日服新卡池/活动 | 5.22s | 3,075 | 给出万圣节卡池与活动截止日 |
+| 下一次国内油价调整 | 1.99s | 1,389 | 正确答 2026-10-29 24:00 |
+
+合计 23.62s / 15,284 token，平均 3.94s、中位 3.97s；搜索阶段中位约 0.41s。
+6/6 非空，无 error。
+
+**结论**
+- 速度瓶颈确实主要在 Tavily + planner + reader，而不是回答模型；换 provider 后
+  搜索阶段进入亚秒级，端到端主要剩一次回答调用。
+- fast 适合“新闻/赛程/活动/价格”等单点事实；需要多源拼图、对比、深度核验时
+  仍应让模型显式选择 standard/deep。
+- 回答质量仍受 query 表达影响：天气问题没写地点时只能按搜索结果覆盖范围回答，
+  这是输入信息不足，不是链路故障。

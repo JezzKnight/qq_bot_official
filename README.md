@@ -45,7 +45,7 @@ qq_bot/
 ├── chat/               # 一轮对话核心、提示词、落库、用量
 ├── services/           # 模型工厂、记忆、表情同步、会话模型
 ├── tools/              # 工具注册与实现
-├── search/             # 搜索管线（规划/重排/reader/缓存）
+├── search/             # 搜索管线（fast/规划/重排/reader/缓存）
 ├── memory/             # PostgreSQL 仓储、摘要、称呼、术语
 ├── ai/                 # 模型网关
 └── plugins/qqbot_official/  # 事件接线与指令

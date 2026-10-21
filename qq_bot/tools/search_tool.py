@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from nonebot import get_plugin_config
 
+from qq_bot.ai.model_registry import get_registry
+from qq_bot.search.deepseek import DeepSeekSearchProvider
 from qq_bot.search.pipeline import SearchPipeline
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
@@ -29,11 +32,17 @@ async def _get_pipeline() -> SearchPipeline:
         config = get_plugin_config(AiChatConfig)
         model = default_model_name()
         client = await get_client_for_model(model)
+        spec = get_registry().resolve(model)
+        api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
+        if not api_key and spec is not None and "deepseek" in spec.base_url:
+            api_key = spec.api_key
+        fast_provider = DeepSeekSearchProvider(api_key) if api_key else None
         _pipeline = SearchPipeline(
             TavilyClient(config),
             client,
             model,
             usage_recorder=token_usage.record,
+            fast_provider=fast_provider,
         )
     return _pipeline
 
@@ -41,8 +50,8 @@ async def _get_pipeline() -> SearchPipeline:
 @register_tool(
     name="search",
     description=(
-        "联网搜索：一次调用自动规划 query、搜索、去重重排，并按需抓取正文。"
-        "适合查新闻、赛程、活动、价格、攻略等实时信息。"
+        "联网搜索：默认 fast 使用 DeepSeek 搜索 API，约 2-4 秒返回摘要；"
+        "复杂问题可用 standard/deep 做多 query + 正文。适合查新闻、赛程、活动、价格。"
     ),
     parameters={
         "type": "object",
@@ -53,16 +62,16 @@ async def _get_pipeline() -> SearchPipeline:
             },
             "mode": {
                 "type": "string",
-                "enum": ["auto", "quick", "standard", "deep"],
+                "enum": ["fast", "auto", "quick", "standard", "deep"],
                 "description": (
-                    "auto 默认；quick 只快查；deep 多 query + 正文，适合对比/分析"
+                    "fast 默认，DeepSeek 单次摘要；auto/standard/deep 多 query + 正文"
                 ),
             },
         },
         "required": ["query"],
     },
 )
-async def search(query: str, mode: str = "auto") -> str:
+async def search(query: str, mode: str = "fast") -> str:
     tracker = current_search_tracker.get()
     if tracker is not None:
         tracker["search_rounds"] += 1

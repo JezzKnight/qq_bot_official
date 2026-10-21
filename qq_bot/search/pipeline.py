@@ -21,6 +21,7 @@ from qq_bot.search.types import SearchItem, SearchMode, SearchOutcome
 
 if TYPE_CHECKING:
     from qq_bot.ai.openai_client import OpenaiCompatClient
+    from qq_bot.search.deepseek import DeepSeekSearchProvider
     from qq_bot.tools.tavily_client import TavilyClient
 
 logger = logging.getLogger(__name__)
@@ -41,14 +42,33 @@ _DEEP_MARKERS = (
     "影响",
 )
 
-_MODE_QUERY_LIMIT: dict[SearchMode, int] = {"quick": 1, "standard": 2, "deep": 3}
-_MODE_RESULTS: dict[SearchMode, int] = {"quick": 4, "standard": 8, "deep": 10}
-_MODE_READER_TOP_N: dict[SearchMode, int] = {"quick": 0, "standard": 2, "deep": 3}
+_MODE_QUERY_LIMIT: dict[SearchMode, int] = {
+    "fast": 1,
+    "quick": 1,
+    "standard": 2,
+    "deep": 3,
+}
+_MODE_RESULTS: dict[SearchMode, int] = {
+    "fast": 5,
+    "quick": 4,
+    "standard": 8,
+    "deep": 10,
+}
+_MODE_READER_TOP_N: dict[SearchMode, int] = {
+    "fast": 0,
+    "quick": 0,
+    "standard": 2,
+    "deep": 3,
+}
 _MODE_DEPTH: dict[SearchMode, str] = {
+    "fast": "basic",
     "quick": "basic",
     "standard": "basic",
     "deep": "advanced",
 }
+
+_FAST_RESULTS = 5
+_FAST_CONTEXT_CHARS = 3000
 
 
 def resolve_mode(question: str, requested: str) -> SearchMode:
@@ -70,9 +90,9 @@ def _float_or_zero(value: object) -> float:
 
 
 class SearchPipeline:
-    """Tavily 单源起步；接口保持纯异步，方便以后替换搜索/reader 提供方。"""
+    """Tavily 负责 standard/deep，DeepSeek Search 负责 fast；接口保持纯异步。"""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         tavily: TavilyClient,
         client: OpenaiCompatClient,
@@ -80,14 +100,16 @@ class SearchPipeline:
         *,
         cache: SearchCache | None = None,
         usage_recorder: UsageRecorder | None = None,
+        fast_provider: DeepSeekSearchProvider | None = None,
     ) -> None:
         self._tavily = tavily
+        self._fast_provider = fast_provider
         self._client = client
         self._model = model
         self._cache = cache or SearchCache()
         self._usage_recorder = usage_recorder
 
-    async def run(
+    async def run(  # noqa: C901
         self,
         question: str,
         *,
@@ -103,6 +125,14 @@ class SearchPipeline:
             return outcome
         if time_range is None:
             time_range = infer_time_range(question)
+        if resolved == "fast":
+            return await self._run_fast(
+                question,
+                outcome,
+                time_range=time_range,
+                force_refresh=force_refresh,
+                started=started,
+            )
 
         queries = await plan_queries(
             self._client,
@@ -166,6 +196,69 @@ class SearchPipeline:
         outcome.items = ranked
         outcome.context = build_context(ranked)
         outcome.cached = cache_hits == len(queries)
+        outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return outcome
+
+    async def _run_fast(
+        self,
+        question: str,
+        outcome: SearchOutcome,
+        *,
+        time_range: str | None,
+        force_refresh: bool,
+        started: float,
+    ) -> SearchOutcome:
+        """DeepSeek Search 快路径：不规划、不抓正文，只保留压缩后的摘要。"""
+        outcome.queries = [question]
+        if self._fast_provider is None:
+            outcome.error = "DeepSeek 搜索未配置"
+            outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
+            return outcome
+
+        key = make_cache_key(
+            question,
+            depth="deepseek",
+            max_results=_FAST_RESULTS,
+            time_range=time_range,
+        )
+        if not force_refresh:
+            cached = self._cache.get(key)
+            if cached is not None:
+                ranked = dedupe_and_rerank(cached, question, limit=_FAST_RESULTS)
+                if time_range:
+                    ranked = sort_by_recency(ranked)
+                outcome.items = ranked
+                outcome.context = build_context(ranked, max_chars=_FAST_CONTEXT_CHARS)
+                outcome.cached = True
+                outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
+                return outcome
+
+        search_started = time.perf_counter()
+        try:
+            items = await self._fast_provider.search(
+                question,
+                count=_FAST_RESULTS,
+                need_content=False,
+                ori_question=question,
+            )
+        except Exception as exc:  # noqa: BLE001 - provider 失败要转成工具可读错误
+            logger.warning("DeepSeek 搜索失败: %s", exc)
+            outcome.error = f"DeepSeek 搜索失败: {exc}"
+            outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
+            return outcome
+        outcome.search_ms = int((time.perf_counter() - search_started) * 1000)
+
+        if not items:
+            outcome.error = "DeepSeek 没有搜索到结果"
+            outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
+            return outcome
+
+        ranked = dedupe_and_rerank(items, question, limit=_FAST_RESULTS)
+        if time_range:
+            ranked = sort_by_recency(ranked)
+        outcome.items = ranked
+        outcome.context = build_context(ranked, max_chars=_FAST_CONTEXT_CHARS)
+        self._cache.put(key, items)
         outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
         return outcome
 

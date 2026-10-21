@@ -209,4 +209,6 @@ def build_context(
             break
         blocks.append(block)
         used += len(block) + 2
-    return "\n\n".join(blocks)
+    context = "\n\n".join(blocks)
+    # 末尾的省略号也算字符；硬裁一次，保证调用方的 context 预算不被突破。
+    return context[:max_chars].rstrip()
