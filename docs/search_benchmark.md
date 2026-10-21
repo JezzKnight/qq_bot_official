@@ -3,7 +3,7 @@
 - 分支：`feat/search-pipeline-benchmark`（基线 `5c043e8`）
 - 日期：2026-10-21（Asia/Shanghai）
 - 模型：`deepseek-v4-flash`；搜索源：Tavily
-- 原始数据：`docs/search_benchmark_raw.json`
+- 原始数据：已从主分支移除，仅保留本报告的汇总数据
 - 6 题合计：legacy **182.04s / 179,435 tokens**，improved **79.30s / 34,365 tokens**
 
 ## 结论摘要
@@ -197,7 +197,7 @@
 - 新增 `qq_bot/tools/search_tool.py`，注册主模型工具 `search`；`qq_bot/chat/turn.py` 把主模型可见工具从 `search_agent` 换成 `search`，仍限制每轮最多搜索一次。旧 `search_agent`/`SearchAgent` 保留给 legacy 基准和兼容。
 - `qq_bot/tools/tavily_client.py`：`TavilyClient` 支持注入 `AiChatConfig`（基准/测试可脱离 NoneBot），把大量 `print` 改为 logger，保留 432/433 多 key 轮换。
 - 新增 `prompts/agents/search_answer.md`：只依据 `[S#]` 证据、标注截至日期、证据不足直说、200 字以内；`{{ current_date }}` 由调用方注入。
-- 新增 `scripts/search_benchmark.py`：双链路跑同一批问题，记录答案、耗时、token、来源、错误，增量写 raw JSON。
+- 曾新增 `scripts/search_benchmark.py`：双链路跑同一批问题，记录答案、耗时、token、来源、错误，增量写 raw JSON；基准脚本与原始 JSON 已在收尾时从主分支移除，仅保留本报告。
 - 新增 `tests/test_search_pipeline.py`：模式路由、清洗、域名多样性、编号、quick/standard 的 reader 行为、缓存、日期解析与按新到旧排序。
 - 时效修复：`time_range` 非空时对证据做 `sort_by_recency`，并把当天日期注入最终回答 prompt，避免“10-21 还在引用 10-15 的旧调价窗口”。
 
@@ -220,6 +220,5 @@
 ```bash
 cd /opt/project/qq_bot_official
 .venv/bin/python -m pytest -q tests/test_search_pipeline.py
-.venv/bin/python scripts/search_benchmark.py
 ```
-脚本从 `.env` 读取 `TAVILY_KEY` 和模型 key，不把密钥写入仓库。
+基准脚本已从主分支移除；如需重跑，可从 git 历史恢复 `scripts/search_benchmark.py`。脚本从 `.env` 读取 `TAVILY_KEY` 和模型 key，不把密钥写入仓库。
