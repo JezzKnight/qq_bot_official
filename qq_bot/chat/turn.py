@@ -22,6 +22,7 @@ from qq_bot.memory.members import members_xml
 from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.memory.naming import escape_for_prompt
 from qq_bot.platform.reply import split_for_reply
+from qq_bot.search.retry import RETRY_ACK, looks_insufficient
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
     default_model_name,
@@ -46,6 +47,7 @@ from qq_bot.tools import (
     current_sender_name,
     get_tools_schema,
 )
+from qq_bot.tools.search_tool import retry_search
 
 if TYPE_CHECKING:
 
@@ -208,6 +210,9 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
 
     client = await get_client_for_model(model_name)
     search_called = False
+    search_retried = False
+    last_search_query = ""
+    reply_parts_used = 0
     final_content = FALLBACK_TEXT
     for _ in range(MAX_TOOL_ROUNDS):
         response = await client.chat(
@@ -223,7 +228,46 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
             response.completion_tokens,
         )
         if not response.tool_calls:
-            final_content = response.content or "AI暂时无法响应"
+            answer = response.content or ""
+            if (
+                not search_retried
+                and search_called
+                and last_search_query
+                and looks_insufficient(answer)
+            ):
+                search_retried = True
+                try:
+                    await incoming.reply.text(RETRY_ACK)
+                    reply_parts_used += 1
+                except Exception:
+                    logger.warning("补查提示发送失败，继续补查", exc_info=True)
+
+                try:
+                    retry_context = await retry_search(last_search_query)
+                except Exception:
+                    logger.exception("搜索补查异常，保留原回答")
+                    retry_context = ""
+                if retry_context:
+                    messages.append(
+                        ChatMessage(
+                            role="assistant",
+                            content=answer,
+                            reasoning_content=response.reasoning_content,
+                        )
+                    )
+                    messages.append(
+                        ChatMessage(
+                            role="user",
+                            content=(
+                                "（系统补查）上一轮检索结果不足，已经换关键词重新搜索。"
+                                "请只依据下面的新证据重新回答；如果新证据仍然不足，"
+                                "再明确说没查到。不要复述补查过程。\n"
+                                f"{retry_context}"
+                            ),
+                        )
+                    )
+                    continue
+            final_content = answer or "AI暂时无法响应"
             break
 
         messages.append(
@@ -242,6 +286,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
                     result = "[系统提示] 本轮已搜索过，直接基于现有信息回答。"
                 else:
                     search_called = True
+                    last_search_query = str(args.get("query") or incoming.text)
                     tracker: SearchTracker = {
                         "tavily_success": False,
                         "tavily_error_count": 0,
@@ -280,7 +325,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     logger.info("TURN persist done")
 
     if is_group:
-        max_parts = incoming.reply.max_parts
+        max_parts = max(1, incoming.reply.max_parts - reply_parts_used)
         if pending_sticker is not None and max_parts > 1:
             # 给表情包留一次发送额度
             max_parts -= 1

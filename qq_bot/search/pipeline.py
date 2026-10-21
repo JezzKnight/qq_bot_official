@@ -17,6 +17,7 @@ from qq_bot.search.rerank import (
     normalize_url,
     sort_by_recency,
 )
+from qq_bot.search.retry import build_retry_queries
 from qq_bot.search.types import SearchItem, SearchMode, SearchOutcome
 
 if TYPE_CHECKING:
@@ -199,6 +200,45 @@ class SearchPipeline:
         outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
         return outcome
 
+    async def run_retry(
+        self,
+        question: str,
+        *,
+        max_queries: int = 3,
+        force_refresh: bool = False,
+    ) -> SearchOutcome:
+        """第一次 fast 回答“没查到”时，用改写后的 query 再搜一轮。"""
+        started = time.perf_counter()
+        outcome = SearchOutcome(question=question, mode="fast")
+        if not question.strip():
+            outcome.error = "问题为空"
+            return outcome
+        if self._fast_provider is None:
+            outcome.error = "DeepSeek 搜索未配置"
+            outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
+            return outcome
+
+        queries = await build_retry_queries(
+            self._client,
+            self._model,
+            question,
+            max_queries=max_queries,
+            usage_recorder=self._usage_recorder,
+        )
+        outcome.queries = queries
+        if not queries:
+            outcome.error = "没有生成补查 query"
+            outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
+            return outcome
+        return await self._run_fast_queries(
+            question,
+            queries,
+            outcome,
+            time_range=infer_time_range(question),
+            force_refresh=force_refresh,
+            started=started,
+        )
+
     async def _run_fast(
         self,
         question: str,
@@ -210,43 +250,59 @@ class SearchPipeline:
     ) -> SearchOutcome:
         """DeepSeek Search 快路径：不规划、不抓正文，只保留压缩后的摘要。"""
         outcome.queries = [question]
+        return await self._run_fast_queries(
+            question,
+            [question],
+            outcome,
+            time_range=time_range,
+            force_refresh=force_refresh,
+            started=started,
+        )
+
+    async def _run_fast_queries(  # noqa: PLR0913
+        self,
+        question: str,
+        queries: list[str],
+        outcome: SearchOutcome,
+        *,
+        time_range: str | None,
+        force_refresh: bool,
+        started: float,
+    ) -> SearchOutcome:
         if self._fast_provider is None:
             outcome.error = "DeepSeek 搜索未配置"
             outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
             return outcome
 
-        key = make_cache_key(
-            question,
-            depth="deepseek",
-            max_results=_FAST_RESULTS,
-            time_range=time_range,
-        )
-        if not force_refresh:
-            cached = self._cache.get(key)
-            if cached is not None:
-                ranked = dedupe_and_rerank(cached, question, limit=_FAST_RESULTS)
-                if time_range:
-                    ranked = sort_by_recency(ranked)
-                outcome.items = ranked
-                outcome.context = build_context(ranked, max_chars=_FAST_CONTEXT_CHARS)
-                outcome.cached = True
-                outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
-                return outcome
-
-        search_started = time.perf_counter()
-        try:
-            items = await self._fast_provider.search(
-                question,
-                count=_FAST_RESULTS,
-                need_content=False,
-                ori_question=question,
-            )
-        except Exception as exc:  # noqa: BLE001 - provider 失败要转成工具可读错误
-            logger.warning("DeepSeek 搜索失败: %s", exc)
-            outcome.error = f"DeepSeek 搜索失败: {exc}"
+        unique_queries = list(dict.fromkeys(q.strip() for q in queries if q.strip()))
+        if not unique_queries:
+            outcome.error = "没有有效的搜索 query"
             outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
             return outcome
+        outcome.queries = unique_queries
+
+        search_started = time.perf_counter()
+        batches = await asyncio.gather(
+            *(
+                self._fast_search(
+                    query,
+                    question=question,
+                    time_range=time_range,
+                    force_refresh=force_refresh,
+                )
+                for query in unique_queries
+            )
+        )
         outcome.search_ms = int((time.perf_counter() - search_started) * 1000)
+
+        items: list[SearchItem] = []
+        cache_hits = 0
+        for batch, warning, from_cache in batches:
+            items.extend(batch)
+            if warning:
+                outcome.warnings.append(warning)
+            if from_cache:
+                cache_hits += 1
 
         if not items:
             outcome.error = "DeepSeek 没有搜索到结果"
@@ -258,9 +314,46 @@ class SearchPipeline:
             ranked = sort_by_recency(ranked)
         outcome.items = ranked
         outcome.context = build_context(ranked, max_chars=_FAST_CONTEXT_CHARS)
-        self._cache.put(key, items)
+        outcome.cached = cache_hits == len(unique_queries)
         outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
         return outcome
+
+    async def _fast_search(
+        self,
+        query: str,
+        *,
+        question: str,
+        time_range: str | None,
+        force_refresh: bool,
+    ) -> tuple[list[SearchItem], str, bool]:
+        provider = self._fast_provider
+        if provider is None:
+            return [], "DeepSeek 搜索未配置", False
+
+        key = make_cache_key(
+            query,
+            depth="deepseek",
+            max_results=_FAST_RESULTS,
+            time_range=time_range,
+        )
+        if not force_refresh:
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached, "", True
+
+        try:
+            items = await provider.search(
+                query,
+                count=_FAST_RESULTS,
+                need_content=False,
+                ori_question=question,
+            )
+        except Exception as exc:  # noqa: BLE001 - provider 失败要转成工具可读错误
+            logger.warning("DeepSeek 搜索失败 query=%s: %s", query, exc)
+            return [], f"DeepSeek 搜索失败: {query}", False
+        if items:
+            self._cache.put(key, items)
+        return items, "", False
 
     async def _search_one(
         self,

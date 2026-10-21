@@ -15,6 +15,7 @@ from qq_bot.search.rerank import (
     published_timestamp,
     sort_by_recency,
 )
+from qq_bot.search.retry import RETRY_ACK, build_retry_queries, looks_insufficient
 from qq_bot.search.types import SearchItem
 
 if TYPE_CHECKING:
@@ -305,3 +306,47 @@ def test_deepseek_parse_uses_summary_by_default_and_content_when_requested() -> 
     assert summary_item.published_date == "2026-10-21"
     assert summary_item.score == 0.9
     assert summary_item.source == "example"
+
+
+def test_looks_insufficient_only_matches_explicit_no_data_answers() -> None:
+    assert RETRY_ACK == "这个我得好好查查"
+    assert looks_insufficient("")
+    assert looks_insufficient("没查到 2026 年 11 月的可靠资料")
+    assert looks_insufficient("目前无法确认下个月的具体赛程")
+    assert not looks_insufficient("决赛在 11 月 15 日 03:00 开始")
+    assert not looks_insufficient("我不确定具体时间，但决赛在 11 月 15 日")
+
+
+async def test_fast_retry_rewrites_query_and_searches_each_one() -> None:
+    fake_tavily = FakeTavily()
+    deepseek = FakeDeepSeek()
+    model = FakeModel(
+        '["赛马娘 2026年11月 LoH 京都3000m 强势 马娘", '
+        '"ウマ娘 2026年11月 リーグオブヒーローズ 京都3000m 攻略"]'
+    )
+    pipeline = _pipeline(fake_tavily, model, deepseek)
+
+    outcome = await pipeline.run_retry("下个月赛马娘大赛什么马比较强势")
+
+    assert len(deepseek.calls) == 2
+    assert outcome.queries == [
+        "赛马娘 2026年11月 LoH 京都3000m 强势 马娘",
+        "ウマ娘 2026年11月 リーグオブヒーローズ 京都3000m 攻略",
+    ]
+    assert all(
+        call["ori_question"] == "下个月赛马娘大赛什么马比较强势"
+        for call in deepseek.calls
+    )
+    assert fake_tavily.search_calls == []
+    assert outcome.error == ""
+    assert "[S1]" in outcome.context
+
+
+async def test_build_retry_queries_falls_back_when_model_returns_garbage() -> None:
+    queries = await build_retry_queries(
+        cast("OpenaiCompatClient", FakeModel("这不是 JSON")),
+        "fake-model",
+        "赛马娘大赛",
+    )
+    assert len(queries) >= 2
+    assert all("赛马娘大赛" in query for query in queries)

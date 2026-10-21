@@ -52,6 +52,7 @@ async def _get_pipeline() -> SearchPipeline:
     description=(
         "联网搜索：默认 fast 使用 DeepSeek 搜索 API，约 2-4 秒返回摘要；"
         "复杂问题可用 standard/deep 做多 query + 正文。适合查新闻、赛程、活动、价格。"
+        "如果结果不足，系统会自动换关键词补查一次，不需要重复调用。"
     ),
     parameters={
         "type": "object",
@@ -99,6 +100,34 @@ async def search(query: str, mode: str = "fast") -> str:
         return f"[搜索失败] {outcome.error or '没有找到有效结果'}"
     if outcome.warnings:
         logger.info("search 警告: %s", "; ".join(outcome.warnings))
+    return outcome.context
+
+
+async def retry_search(query: str) -> str:
+    """结果不足时由 turn 直接调用：改写 query 后再搜一轮，返回新的证据上下文。"""
+    tracker = current_search_tracker.get()
+    if tracker is not None:
+        tracker["search_rounds"] += 1
+
+    try:
+        pipeline = await _get_pipeline()
+        outcome = await pipeline.run_retry(query)
+    except Exception:
+        logger.exception("search 补查失败")
+        if tracker is not None:
+            tracker["tavily_error_count"] += 1
+        return ""
+
+    if tracker is not None:
+        if outcome.items:
+            tracker["tavily_success"] = True
+        else:
+            tracker["tavily_error_count"] += 1
+    if not outcome.items:
+        logger.info("search 补查无结果 query=%s error=%s", query, outcome.error)
+        return ""
+    if outcome.warnings:
+        logger.info("search 补查警告: %s", "; ".join(outcome.warnings))
     return outcome.context
 
 

@@ -121,22 +121,92 @@ async def test_group_turn_mentions_sender(patched) -> None:  # noqa: ARG001
     assert reply.sent[0][1].startswith("openid-12345|")
 
 
+class RetryClient:
+    def __init__(self) -> None:
+        self.responses = [
+            SimpleNamespace(
+                content=None,
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "search",
+                            "arguments": '{"query": "赛马娘 2026年11月 大赛"}',
+                        },
+                    }
+                ],
+                reasoning_content=None,
+                prompt_tokens=10,
+                cached_tokens=0,
+                completion_tokens=3,
+            ),
+            SimpleNamespace(
+                content="没查到 2026 年 11 月的可靠资料",
+                tool_calls=None,
+                reasoning_content=None,
+                prompt_tokens=10,
+                cached_tokens=0,
+                completion_tokens=3,
+            ),
+            SimpleNamespace(
+                content="补查后的答案",
+                tool_calls=None,
+                reasoning_content=None,
+                prompt_tokens=10,
+                cached_tokens=0,
+                completion_tokens=3,
+            ),
+        ]
+
+    async def chat(self, **_kwargs):
+        return self.responses.pop(0)
+
+
+async def test_turn_retries_once_after_insufficient_search(
+    patched,  # noqa: ARG001
+    monkeypatch,
+) -> None:
+    client = RetryClient()
+    retry_calls: list[str] = []
+
+    async def fake_search(**_kwargs):
+        return "[S1] 旧证据"
+
+    async def fake_retry(query: str) -> str:
+        retry_calls.append(query)
+        return "[S1] 新证据：2026年11月是 LoH"
+
+    monkeypatch.setattr(
+        turn_mod, "get_client_for_model", lambda _m: _async_value(client)
+    )
+    monkeypatch.setattr(turn_mod, "get_tools_schema", lambda *_names: [])
+    monkeypatch.setattr(turn_mod, "TOOLS", {"search": {"func": fake_search}})
+    monkeypatch.setattr(turn_mod, "retry_search", fake_retry)
+
+    reply = FakeReply()
+    result = await turn_mod.run_turn(_incoming(reply), config=_config())
+
+    assert result == "补查后的答案"
+    assert retry_calls == ["赛马娘 2026年11月 大赛"]
+    assert ("text", "这个我得好好查查") in reply.sent
+    assert ("text", "补查后的答案") in reply.sent
+
+
 async def patched_repo_rows():
     # 借助 turn_mod.get_memory 的返回值拿仓储（fixture 已把它指向 repo）
     repo = await turn_mod.get_memory()
-    return await repo.pool.fetch(
-        "SELECT role, content FROM messages ORDER BY id"
-    )
+    return await repo.pool.fetch("SELECT role, content FROM messages ORDER BY id")
 
 
 def test_compression_skipped_without_full_group_access() -> None:
     incoming = dataclasses.replace(
         _incoming(FakeReply()),
         caps=PlatformCaps(
-                can_see_all_group_messages=False,
+            can_see_all_group_messages=False,
             can_send_image=True,
-                max_reply_parts=4,
-            ),
+            max_reply_parts=4,
+        ),
     )
     assert turn_mod._compression_scheduler(incoming) is None
 
@@ -145,9 +215,9 @@ def test_compression_enabled_with_full_group_access() -> None:
     incoming = dataclasses.replace(
         _incoming(FakeReply()),
         caps=PlatformCaps(
-                can_see_all_group_messages=True,
+            can_see_all_group_messages=True,
             can_send_image=True,
-                max_reply_parts=4,
-            ),
+            max_reply_parts=4,
+        ),
     )
     assert turn_mod._compression_scheduler(incoming) is not None
