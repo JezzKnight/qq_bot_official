@@ -70,3 +70,8 @@ def test_persona_uses_sticker_name() -> None:
     text = (CHAT_DIR / "persona.md").read_text(encoding="utf-8")
     assert "等饭" in text
     assert "`ee`" not in text
+
+
+def test_research_has_no_source_footer() -> None:
+    text = (CHAT_DIR / "research.md").read_text(encoding="utf-8")
+    assert "末尾给一条最相关来源" not in text
