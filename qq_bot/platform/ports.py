@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 @dataclass(frozen=True)
@@ -25,11 +25,15 @@ class PlatformCaps:
 
 
 class ReplyTarget(Protocol):
-    """回复通道：核心只依赖这三个动作。"""
+    """回复通道：核心动作。"""
 
     max_parts: int
 
     async def text(self, content: str) -> None: ...
+
+    async def passive(self, content: str) -> None:
+        """立即发送一条被动回复，用于最终答复前的短提示。"""
+        ...
 
     async def mention(self, user_key: str, content: str) -> None: ...
 

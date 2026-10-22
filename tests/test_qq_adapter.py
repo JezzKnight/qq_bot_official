@@ -62,6 +62,9 @@ class FakeReply:
     async def text(self, content: str) -> None:
         self.sent.append(("text", content))
 
+    async def passive(self, content: str) -> None:
+        self.sent.append(("passive", content))
+
     async def mention(self, user_key: str, _content: str) -> None:
         self.sent.append(("mention", user_key))
 

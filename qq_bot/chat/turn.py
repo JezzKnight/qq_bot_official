@@ -247,7 +247,9 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
             ):
                 search_retried = True
                 try:
-                    await incoming.reply.text(RETRY_ACK)
+                    # 走被动回复通道：补偿消息和最终回复同一通道，QQ 不会因为
+                    # 主动消息排队而让最终回复先到；不能用 text()（主动消息）。
+                    await incoming.reply.passive(RETRY_ACK)
                     reply_parts_used += 1
                 except Exception:
                     logger.warning("补查提示发送失败，继续补查", exc_info=True)

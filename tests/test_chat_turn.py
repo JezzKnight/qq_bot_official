@@ -22,6 +22,9 @@ class FakeReply:
     async def text(self, content: str) -> None:
         self.sent.append(("text", content))
 
+    async def passive(self, content: str) -> None:
+        self.sent.append(("passive", content))
+
     async def mention(self, user_key: str, content: str) -> None:
         self.sent.append(("mention", f"{user_key}|{content}"))
 
@@ -169,12 +172,14 @@ async def test_turn_retries_once_after_insufficient_search(
 ) -> None:
     client = RetryClient()
     retry_calls: list[str] = []
+    retry_snapshots: list[tuple[tuple[str, str], ...]] = []
 
     async def fake_search(**_kwargs):
         return "[S1] 旧证据"
 
     async def fake_retry(query: str) -> str:
         retry_calls.append(query)
+        retry_snapshots.append(tuple(reply.sent))
         return "[S1] 新证据：2026年11月是 LoH"
 
     monkeypatch.setattr(
@@ -189,8 +194,12 @@ async def test_turn_retries_once_after_insufficient_search(
 
     assert result == "补查后的答案"
     assert retry_calls == ["赛马娘 2026年11月 大赛"]
-    assert ("text", "这个我得好好查查") in reply.sent
+    assert retry_snapshots == [(("passive", "这个我得好好查查"),)]
+    assert reply.sent[0] == ("passive", "这个我得好好查查")
     assert ("text", "补查后的答案") in reply.sent
+    assert reply.sent.index(("passive", "这个我得好好查查")) < reply.sent.index(
+        ("text", "补查后的答案")
+    )
 
 
 async def patched_repo_rows():
