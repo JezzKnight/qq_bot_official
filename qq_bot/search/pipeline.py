@@ -68,8 +68,8 @@ _MODE_DEPTH: dict[SearchMode, str] = {
     "deep": "advanced",
 }
 
-_FAST_RESULTS = 5
-_FAST_CONTEXT_CHARS = 3000
+_FAST_RESULTS = 8
+_FAST_CONTEXT_CHARS = 4000
 
 
 def resolve_mode(question: str, requested: str) -> SearchMode:

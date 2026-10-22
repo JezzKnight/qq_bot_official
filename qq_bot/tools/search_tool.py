@@ -50,22 +50,22 @@ async def _get_pipeline() -> SearchPipeline:
 @register_tool(
     name="search",
     description=(
-        "联网搜索：默认 fast 使用 DeepSeek 搜索 API，约 2-4 秒返回摘要；"
-        "复杂问题可用 standard/deep 做多 query + 正文。适合查新闻、赛程、活动、价格。"
-        "如果结果不足，系统会自动换关键词补查一次，不需要重复调用。"
+        "联网搜索：固定 fast 使用 DeepSeek 搜索 API，约 2-4 秒返回摘要。"
+        "适合查新闻、赛程、活动、价格。"
+        "游戏赛事/卡池先判断活动类型和服务器，不要把“大赛”默认成冠军会。"
+        "游戏赛事第一次查只写“游戏名 服务器 年月 大赛 攻略”，不要预写冠军会。"
+        "拿到结果后直接回答；只有结果不足时系统才换关键词补查一次。"
     ),
     parameters={
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "用自然语言描述要查什么，尽量带时间、对象、地区",
-            },
-            "mode": {
-                "type": "string",
-                "enum": ["fast", "auto", "quick", "standard", "deep"],
                 "description": (
-                    "fast 默认，DeepSeek 单次摘要；auto/standard/deep 多 query + 正文"
+                    "搜索关键词，不要只写整句问题。游戏赛事第一次查只写："
+                    "游戏名 服务器 年月 大赛 攻略，不要预写冠军会/"
+                    "チャンピオンズミーティング，先让搜索判断活动类型。"
+                    "例：ウマ娘 日服 2026年11月 大赛 攻略"
                 ),
             },
         },

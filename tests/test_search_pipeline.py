@@ -271,7 +271,7 @@ async def test_fast_mode_uses_deepseek_without_planner_or_reader() -> None:
     assert len(deepseek.calls) == 1
     assert deepseek.calls[0]["need_content"] is False
     assert "[S1]" in outcome.context
-    assert len(outcome.context) <= 3000
+    assert len(outcome.context) <= 4000
 
 
 async def test_fast_mode_cache_avoids_duplicate_deepseek_calls() -> None:

@@ -11,7 +11,7 @@ from prompts.renderer import PromptRenderer
 from prompts.service import PromptChainError, PromptService, prompt_service
 
 CHAT_DIR = Path("prompts/chat")
-BASE_ORDER = ["persona", "social", "constraints", "platform", "multimodal"]
+BASE_ORDER = ["persona", "social", "constraints", "research", "platform", "multimodal"]
 
 
 def _marker(name: str) -> str:
@@ -24,7 +24,7 @@ def _positions(text: str, names: list[str]) -> list[int]:
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 4
+    assert prompt_service.chain_version == 5
     assert all(ref.version.startswith("v") for ref in prompt_service.modules)
 
 
@@ -58,3 +58,15 @@ def test_path_traversal_rejected(tmp_path: Path) -> None:
 
 def test_renderer_substitutes_variables() -> None:
     assert PromptRenderer().render("a {{ x }}", x="b") == "a b"
+
+
+def test_research_prompt_is_loaded() -> None:
+    text = prompt_service.get_system_prompt()
+    assert "League of Heroes" in text
+    assert "不要默认" in text
+
+
+def test_persona_uses_sticker_name() -> None:
+    text = (CHAT_DIR / "persona.md").read_text(encoding="utf-8")
+    assert "等饭" in text
+    assert "`ee`" not in text
