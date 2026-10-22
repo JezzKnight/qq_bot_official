@@ -42,9 +42,9 @@ def _float_env(name: str, default: float) -> float:
 class VideoConfig:
     """视频下载、抽帧与分析参数。"""
 
-    max_duration: int = 300
+    max_duration: int = 600
     max_frames: int = 8
-    max_bytes: int = 80 * 1024 * 1024
+    max_bytes: int = 160 * 1024 * 1024
     frame_width: int = 768
     scene_threshold: float = 10.0
     max_subtitle_chars: int = 6_000
@@ -54,15 +54,15 @@ class VideoConfig:
     ytdlp: str = "yt-dlp"
     bilibili_cookie: str = ""
     ytdlp_cookies: str = ""
-    download_timeout: float = 90.0
-    ytdlp_timeout: float = 120.0
+    download_timeout: float = 180.0
+    ytdlp_timeout: float = 240.0
 
     @classmethod
     def from_env(cls) -> VideoConfig:
         return cls(
-            max_duration=_int_env("VIDEO_MAX_DURATION", 300),
+            max_duration=_int_env("VIDEO_MAX_DURATION", 600),
             max_frames=max(3, _int_env("VIDEO_MAX_FRAMES", 8)),
-            max_bytes=max(1, _int_env("VIDEO_MAX_MB", 80)) * 1024 * 1024,
+            max_bytes=max(1, _int_env("VIDEO_MAX_MB", 160)) * 1024 * 1024,
             frame_width=max(320, _int_env("VIDEO_FRAME_WIDTH", 768)),
             scene_threshold=_float_env("VIDEO_SCENE_THRESHOLD", 10.0),
             max_subtitle_chars=max(1000, _int_env("VIDEO_MAX_SUBTITLE_CHARS", 6_000)),
@@ -72,6 +72,6 @@ class VideoConfig:
             ytdlp=os.getenv("YTDLP_BIN", "").strip() or _default_binary("yt-dlp"),
             bilibili_cookie=os.getenv("BILIBILI_COOKIE", "").strip(),
             ytdlp_cookies=os.getenv("VIDEO_YTDLP_COOKIES", "").strip(),
-            download_timeout=_float_env("VIDEO_DOWNLOAD_TIMEOUT", 90.0),
-            ytdlp_timeout=_float_env("VIDEO_YTDLP_TIMEOUT", 120.0),
+            download_timeout=_float_env("VIDEO_DOWNLOAD_TIMEOUT", 180.0),
+            ytdlp_timeout=_float_env("VIDEO_YTDLP_TIMEOUT", 240.0),
         )

@@ -313,3 +313,9 @@ async def test_bilibili_subtitles_explains_login_requirement() -> None:
     assert text == ""
     assert lang == ""
     assert warnings == ["B 站匿名无法获取 AI 字幕，需配置 BILIBILI_COOKIE"]
+
+
+def test_video_config_defaults_support_ten_minutes() -> None:
+    config = VideoConfig()
+    assert config.max_duration == 600
+    assert config.max_bytes == 160 * 1024 * 1024
