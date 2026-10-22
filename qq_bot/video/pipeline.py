@@ -137,6 +137,12 @@ class VideoAgent:
     ) -> VideoInsight:
         started = time.monotonic()
         source = await self._resolve_source(self._source_from_input(raw))
+        logger.info(
+            "视频分析开始: platform=%s id=%s question_chars=%d",
+            source.platform,
+            source.video_id or "-",
+            len(question),
+        )
         warnings: list[str] = []
         with tempfile.TemporaryDirectory(prefix="qqbot-video-") as tmp:
             workdir = Path(tmp)
@@ -205,6 +211,12 @@ class VideoAgent:
                 )
             if not transcript:
                 warnings.append("没有可用字幕，结论主要依赖关键帧")
+            logger.info(
+                "视频字幕: lang=%s chars=%d warnings=%s",
+                subtitle_lang or "-",
+                len(transcript),
+                warnings,
+            )
 
             client = await get_client_for_model(self.model)
             params = get_model_params(self.model)
@@ -236,6 +248,15 @@ class VideoAgent:
             ]
             if warnings:
                 body.append("局限：" + "；".join(dict.fromkeys(warnings)))
+            logger.info(
+                "视频分析完成: title=%s duration=%.1fs frames=%d subtitle_chars=%d "
+                "elapsed=%.1fs",
+                title[:40],
+                duration,
+                len(frames),
+                len(transcript),
+                time.monotonic() - started,
+            )
             return VideoInsight(
                 text="\n\n".join(body),
                 title=title,

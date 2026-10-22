@@ -2,16 +2,19 @@
 
 字幕接口的事实（2026-10 实测）：
 - `x/web-interface/view` 匿名可用，返回 bvid/aid/cid/title/duration；
-- `x/player/v2` 匿名返回 `subtitle.subtitles=[]`，且 `need_login_subtitle=true`；
-  带登录 Cookie 时才可能拿到 AI 字幕（`subtitle_url` 常以 `//aisubtitle...` 开头）；
-- UP 主上传的 CC 字幕在部分视频上匿名可见，因此这里不预设“一定没有”，
-  而是有就下载、没有就明确降级，不启动 ASR。
+- 带登录 Cookie 时，`x/player/v2` 可能返回字幕条目，但**无 WBI 签名时
+  subtitle_url 可能是错配/随机内容**，不能直接信任；
+- `x/player/wbi/v2` 带 WBI 签名（wts + w_rid）时返回的 AI 字幕与视频一致；
+- 没有字幕就明确降级到关键帧，不启动 ASR。
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+import time
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -32,6 +35,73 @@ _HEADERS = {
 _BV_RE = re.compile(r"(BV[0-9A-Za-z]{10})")
 _AV_RE = re.compile(r"/video/av(\d+)", re.IGNORECASE)
 _JSON_OK = 0
+_WBI_MIXIN_KEY_ENC_TAB = [
+    46,
+    47,
+    18,
+    2,
+    53,
+    8,
+    23,
+    32,
+    15,
+    50,
+    10,
+    31,
+    58,
+    3,
+    45,
+    35,
+    27,
+    43,
+    5,
+    49,
+    33,
+    9,
+    42,
+    19,
+    29,
+    28,
+    14,
+    39,
+    12,
+    38,
+    41,
+    13,
+    37,
+    48,
+    7,
+    16,
+    24,
+    55,
+    40,
+    61,
+    26,
+    17,
+    0,
+    1,
+    60,
+    51,
+    30,
+    4,
+    22,
+    25,
+    54,
+    21,
+    56,
+    59,
+    6,
+    63,
+    57,
+    62,
+    11,
+    36,
+    20,
+    34,
+    44,
+    52,
+]
+_WBI_FORBIDDEN = "!'()*"
 
 
 class BilibiliError(RuntimeError):
@@ -108,62 +178,113 @@ def parse_subtitle_json(payload: dict[str, Any], *, max_chars: int) -> str:
     return "\n".join(lines)
 
 
-async def fetch_subtitles(  # noqa: PLR0911 —— 字幕有多种降级路径
+def _wbi_mixin_key(img_url: str, sub_url: str) -> str:
+    """按 B 站 WBI 规则把 img/sub key 混淆成 32 位 mixin key。"""
+    img_key = img_url.rsplit("/", 1)[-1].split(".", maxsplit=1)[0]
+    sub_key = sub_url.rsplit("/", 1)[-1].split(".", maxsplit=1)[0]
+    raw = img_key + sub_key
+    return "".join(raw[i] for i in _WBI_MIXIN_KEY_ENC_TAB)[:32]
+
+
+def _sign_wbi(params: dict[str, Any], mixin_key: str) -> dict[str, str]:
+    """给 WBI 参数加 wts/w_rid；返回可直接传给 httpx 的字符串字典。"""
+    filtered = {
+        str(key): str(value)
+        for key, value in sorted(params.items())
+        if not any(ch in str(value) for ch in _WBI_FORBIDDEN)
+    }
+    query = urllib.parse.urlencode(filtered)
+    filtered["w_rid"] = hashlib.md5((query + mixin_key).encode()).hexdigest()
+    return filtered
+
+
+async def _fetch_wbi_mixin_key(
+    client: httpx.AsyncClient, headers: dict[str, str]
+) -> str:
+    resp = await client.get(f"{_API}/x/web-interface/nav", headers=headers)
+    resp.raise_for_status()
+    data = resp.json()
+    wbi = (data.get("data") or {}).get("wbi_img") or {}
+    img_url = str(wbi.get("img_url") or "")
+    sub_url = str(wbi.get("sub_url") or "")
+    if not img_url or not sub_url:
+        msg = "B 站 WBI key 缺失"
+        raise BilibiliError(msg)
+    return _wbi_mixin_key(img_url, sub_url)
+
+
+async def fetch_subtitles(  # noqa: PLR0911
     client: httpx.AsyncClient,
     meta: BilibiliMeta,
     *,
     cookie: str = "",
-    max_chars: int = 12_000,
+    max_chars: int = 6_000,
 ) -> tuple[str, str, list[str]]:
     """返回 (字幕文本, 语言, 警告)。没有字幕时文本为空。"""
     headers = dict(_HEADERS)
     cookie_header = _cookie_header(cookie)
     if cookie_header:
         headers["Cookie"] = cookie_header
+
     try:
+        mixin_key = await _fetch_wbi_mixin_key(client, headers)
+        params = _sign_wbi(
+            {
+                "bvid": meta.bvid,
+                "cid": meta.cid,
+                "wts": int(time.time()),
+            },
+            mixin_key,
+        )
         resp = await client.get(
-            f"{_API}/x/player/v2",
-            params={"bvid": meta.bvid, "cid": meta.cid},
+            f"{_API}/x/player/wbi/v2",
+            params=params,
             headers=headers,
         )
         resp.raise_for_status()
         data = resp.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        return "", "", [f"B 站字幕接口失败: {type(exc).__name__}"]
+    except (httpx.HTTPError, ValueError, BilibiliError) as exc:
+        msg = f"B 站字幕接口失败: {type(exc).__name__}"
+        logger.info("B 站字幕不可用: %s", msg)
+        return "", "", [msg]
 
     if data.get("code") != _JSON_OK:
-        return (
-            "",
-            "",
-            [f"B 站字幕接口返回错误: {data.get('message') or data.get('code')}"],
-        )
+        msg = f"B 站字幕接口返回错误: {data.get('message') or data.get('code')}"
+        logger.info("B 站字幕不可用: %s", msg)
+        return "", "", [msg]
 
     payload = data.get("data") or {}
     subtitles = (payload.get("subtitle") or {}).get("subtitles") or []
     if not subtitles:
-        if payload.get("need_login_subtitle"):
-            return "", "", ["B 站匿名无法获取 AI 字幕，需配置 BILIBILI_COOKIE"]
-        return "", "", ["该视频没有可用的 CC 字幕"]
+        msg = (
+            "B 站匿名无法获取 AI 字幕，需配置 BILIBILI_COOKIE"
+            if payload.get("need_login_subtitle")
+            else "该视频没有可用的 CC 字幕"
+        )
+        logger.info("B 站字幕不可用: %s", msg)
+        return "", "", [msg]
 
-    # 优先中文人工/AI 字幕，其次任意可下载字幕。
-    chosen = next(
+    candidate = next(
         (s for s in subtitles if str(s.get("lan") or "").lower().startswith("zh")),
         subtitles[0],
     )
-    url = str(chosen.get("subtitle_url") or "")
+    url = str(candidate.get("subtitle_url") or "")
     if not url:
-        return "", "", ["B 站字幕列表缺少 subtitle_url"]
+        msg = "B 站字幕列表缺少 subtitle_url"
+        logger.info("B 站字幕不可用: %s", msg)
+        return "", "", [msg]
     if url.startswith("//"):
         url = f"https:{url}"
     try:
         sub_resp = await client.get(url, headers=_HEADERS)
         sub_resp.raise_for_status()
-        payload = sub_resp.json()
+        sub_payload = sub_resp.json()
     except (httpx.HTTPError, ValueError) as exc:
         return "", "", [f"B 站字幕下载失败: {type(exc).__name__}"]
 
-    text = parse_subtitle_json(payload, max_chars=max_chars)
+    text = parse_subtitle_json(sub_payload, max_chars=max_chars)
     if not text:
         return "", "", ["B 站字幕内容为空"]
-    lang = str(chosen.get("lan_doc") or chosen.get("lan") or "字幕")
+    lang = str(candidate.get("lan_doc") or candidate.get("lan") or "字幕")
+    logger.info("B 站字幕下载成功: lang=%s chars=%d", lang, len(text))
     return text, lang, []

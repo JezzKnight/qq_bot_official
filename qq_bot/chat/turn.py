@@ -218,6 +218,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     client = await get_client_for_model(model_name)
     search_called = False
     search_retried = False
+    video_ack_sent = False
     last_search_query = ""
     reply_parts_used = 0
     final_content = FALLBACK_TEXT
@@ -305,6 +306,13 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
                     finally:
                         current_search_tracker.set(None)
             else:
+                if func["name"] == "watch_video" and not video_ack_sent:
+                    video_ack_sent = True
+                    try:
+                        await incoming.reply.text("我去看看这个视频 稍等一下")
+                        reply_parts_used += 1
+                    except Exception:
+                        logger.warning("视频处理提示发送失败，继续分析", exc_info=True)
                 result = await tool["func"](**args)
 
             messages.append(

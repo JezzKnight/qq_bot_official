@@ -18,6 +18,11 @@ UsageRecorder = Callable[[int, int, int], Awaitable[None]]
 _MIN_MAX_TOKENS = 1600
 
 
+def _reasoning_effort(model: str) -> str | None:
+    """DeepSeek V4 默认 high；视频理解只需要低推理预算。"""
+    return "low" if "deepseek" in model.lower() else None
+
+
 def _format_frame_times(frames: list[VideoFrame]) -> str:
     parts = []
     for frame in frames:
@@ -100,6 +105,7 @@ async def analyze_frames(  # noqa: PLR0913 —— 模型调用参数较多
             model=model,
             temperature=0.3,
             max_tokens=max(tokens, _MIN_MAX_TOKENS),
+            reasoning_effort=_reasoning_effort(model),
         )
         if usage_recorder is not None:
             await usage_recorder(

@@ -43,11 +43,11 @@ class VideoConfig:
     """视频下载、抽帧与分析参数。"""
 
     max_duration: int = 300
-    max_frames: int = 12
+    max_frames: int = 8
     max_bytes: int = 80 * 1024 * 1024
     frame_width: int = 768
     scene_threshold: float = 10.0
-    max_subtitle_chars: int = 12_000
+    max_subtitle_chars: int = 6_000
     vision_model: str = ""
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
@@ -61,11 +61,11 @@ class VideoConfig:
     def from_env(cls) -> VideoConfig:
         return cls(
             max_duration=_int_env("VIDEO_MAX_DURATION", 300),
-            max_frames=max(3, _int_env("VIDEO_MAX_FRAMES", 12)),
+            max_frames=max(3, _int_env("VIDEO_MAX_FRAMES", 8)),
             max_bytes=max(1, _int_env("VIDEO_MAX_MB", 80)) * 1024 * 1024,
             frame_width=max(320, _int_env("VIDEO_FRAME_WIDTH", 768)),
             scene_threshold=_float_env("VIDEO_SCENE_THRESHOLD", 10.0),
-            max_subtitle_chars=max(1000, _int_env("VIDEO_MAX_SUBTITLE_CHARS", 12_000)),
+            max_subtitle_chars=max(1000, _int_env("VIDEO_MAX_SUBTITLE_CHARS", 6_000)),
             vision_model=os.getenv("VIDEO_VISION_MODEL", "").strip(),
             ffmpeg=os.getenv("FFMPEG_BIN", "").strip() or _default_binary("ffmpeg"),
             ffprobe=os.getenv("FFPROBE_BIN", "").strip() or _default_binary("ffprobe"),

@@ -75,21 +75,58 @@ def test_direct_media_ref_without_extension_is_treated_as_direct() -> None:
     assert source.platform == "direct"
 
 
-def test_parse_scdet_times_from_ffmpeg_metadata() -> None:
+def test_parse_scdet_times_filters_by_score() -> None:
+    output = """
+    [Parsed_metadata_1] frame:0 pts:0 pts_time:0
+    [Parsed_metadata_1] lavfi.scd.score:38.4
+    [Parsed_metadata_1] frame:1 pts:100 pts_time:0.50
+    [Parsed_metadata_1] lavfi.scd.score:0.2
+    [Parsed_metadata_1] frame:2 pts:200 pts_time:2.50
+    [Parsed_metadata_1] lavfi.scd.score:19.6
+    """
+    assert parse_scdet_times(output) == [0.0, 2.5]
+
+
+def test_parse_scdet_times_returns_empty_when_all_scores_low() -> None:
+    output = """
+    [Parsed_metadata_1] frame:0 pts:0 pts_time:0
+    [Parsed_metadata_1] lavfi.scd.score:0.1
+    [Parsed_metadata_1] frame:1 pts:100 pts_time:0.50
+    [Parsed_metadata_1] lavfi.scd.score:0.2
+    """
+    assert parse_scdet_times(output) == []
+
+
+def test_parse_scdet_times_supports_explicit_time() -> None:
     output = """
     [Parsed_metadata_1] frame:0 pts:0 pts_time:0
     [Parsed_metadata_1] lavfi.scd.time=1.23
-    [Parsed_metadata_1] frame:2 pts:100 pts_time:2.50
-    [Parsed_metadata_1] frame:3 pts:200 pts_time:2.50
     """
-    assert parse_scdet_times(output) == [0.0, 1.23, 2.5]
+    assert parse_scdet_times(output) == [1.23]
 
 
-def test_select_frame_times_keeps_head_and_limit() -> None:
-    times = select_frame_times([1.0, 2.0, 3.0, 4.0], 10.0, max_frames=4)
-    assert times[0] == 0.0
-    assert len(times) == 4
-    assert times[-1] == 9.9
+def test_select_frame_times_covers_long_video() -> None:
+    # 复现：scdet 只解析到片头 2 秒时，旧实现只抽开头和结尾。
+    times = select_frame_times([0.0, 0.5, 1.0, 1.5, 2.0], 77.0, max_frames=12)
+    assert 6 <= len(times) <= 12
+    assert times[0] < 10
+    assert times[-1] > 60
+
+
+def test_select_frame_times_falls_back_to_uniform_buckets() -> None:
+    times = select_frame_times([], 300.0, max_frames=12)
+    assert len(times) == 12
+    assert times[0] < 30
+    assert times[-1] > 270
+
+
+def test_bilibili_cookie_file_supports_sessdata_only(tmp_path: Path) -> None:
+    from qq_bot.video.fetcher import _write_bilibili_cookie_file
+
+    path = _write_bilibili_cookie_file("abc123", tmp_path)
+    assert path is not None
+    text = path.read_text(encoding="utf-8")
+    assert ".bilibili.com\tTRUE\t/\tFALSE\t0\tSESSDATA\tabc123" in text
 
 
 def test_parse_bilibili_subtitle_json_with_timestamps() -> None:
@@ -160,14 +197,44 @@ async def test_make_keyframes_with_generated_video(tmp_path: Path) -> None:
     assert frames[0].jpeg.startswith(b"\xff\xd8")
 
 
-async def test_bilibili_subtitles_sends_cookie_and_reads_cc() -> None:
+def test_wbi_mixin_key_matches_bilibili_example() -> None:
+    from qq_bot.video.bilibili import _sign_wbi, _wbi_mixin_key
+
+    img = "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png"
+    sub = "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png"
+    mixin = _wbi_mixin_key(img, sub)
+    assert mixin == "ea1db124af3c7062474693fa704f4ff8"
+
+    signed = _sign_wbi({"foo": "114", "bar": "514", "zab": 1919810}, mixin)
+    assert signed["foo"] == "114"
+    assert signed["bar"] == "514"
+    assert signed["zab"] == "1919810"
+    assert len(signed["w_rid"]) == 32
+
+
+async def test_bilibili_subtitles_uses_wbi_and_cookie() -> None:
     from qq_bot.video.bilibili import BilibiliMeta, fetch_subtitles
 
     seen: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/x/player/v2"):
+        if request.url.path.endswith("/x/web-interface/nav"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "data": {
+                        "wbi_img": {
+                            "img_url": "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png",
+                            "sub_url": "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png",
+                        }
+                    },
+                },
+            )
+        if request.url.path.endswith("/x/player/wbi/v2"):
             seen["cookie"] = request.headers.get("cookie", "")
+            seen["w_rid"] = request.url.params.get("w_rid", "")
+            seen["wts"] = request.url.params.get("wts", "")
             return httpx.Response(
                 200,
                 json={
@@ -208,12 +275,27 @@ async def test_bilibili_subtitles_sends_cookie_and_reads_cc() -> None:
     assert lang == "中文（自动）"
     assert warnings == []
     assert seen["cookie"] == "SESSDATA=abc"
+    assert len(seen["w_rid"]) == 32
+    assert seen["wts"].isdigit()
 
 
 async def test_bilibili_subtitles_explains_login_requirement() -> None:
     from qq_bot.video.bilibili import BilibiliMeta, fetch_subtitles
 
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/x/web-interface/nav"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "data": {
+                        "wbi_img": {
+                            "img_url": "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png",
+                            "sub_url": "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png",
+                        }
+                    },
+                },
+            )
         return httpx.Response(
             200,
             json={

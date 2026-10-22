@@ -33,13 +33,19 @@ class OpenaiCompatClient:
         )
 
     # **kwargs就是一个普通字典，操作方法与字典一致
-    async def chat(self, messages: list[ChatMessage], model: str | None = None, tools = None, **kwargs) -> ChatResponse:
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        model: str | None = None,
+        tools=None,
+        **kwargs,
+    ) -> ChatResponse:
         """
         封装httpx通过post直接向模型供应商发请求，返回解析后的内容
         """
-        headers = {"Authorization":f"Bearer {self.api_key}"}
+        headers = {"Authorization": f"Bearer {self.api_key}"}
         # API接口不接受null值，直接get获取没填就会得到null
-        payload: dict[str, Any] =   {
+        payload: dict[str, Any] = {
             "model": model or self.default_model,
         }
         # 需要传入工具调用参数传给ai，解析传入的messages
@@ -50,18 +56,21 @@ class OpenaiCompatClient:
                 # 媒体处理：有图片/视频 URL 时，将 content 转为 OpenAI vision 格式的 content parts 数组
                 if (m.images or m.media_urls) and m.role == "user":
                     import base64
+
                     content_parts: list[dict[str, Any]] = []
                     if m.content:
                         content_parts.append({"type": "text", "text": m.content})
                     # 图片：base64 内联
                     for img in m.images or []:
                         b64 = base64.b64encode(img.data).decode("utf-8")
-                        content_parts.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{img.mine_type};base64,{b64}"
+                        content_parts.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{img.mine_type};base64,{b64}"
+                                },
                             }
-                        })
+                        )
                     # 视频/图片 URL：直接透传公开地址（支持视频的模型的官方推荐方式）
                     content_parts.extend(
                         {"type": "image_url", "image_url": {"url": url}}
@@ -87,6 +96,8 @@ class OpenaiCompatClient:
             payload["temperature"] = kwargs["temperature"]
         if "max_tokens" in kwargs:
             payload["max_tokens"] = kwargs["max_tokens"]
+        if kwargs.get("reasoning_effort"):
+            payload["reasoning_effort"] = kwargs["reasoning_effort"]
         # 工具改为由caller传入
         if tools:
             payload["tools"] = tools
@@ -109,7 +120,7 @@ class OpenaiCompatClient:
                 last_error = e
 
                 if attempt < max_retries - 1:
-                    wait = 2 ** attempt  # 1s, 2s, 4s 指数退避
+                    wait = 2**attempt  # 1s, 2s, 4s 指数退避
                     print(
                         f"[WARN] API 调用失败 (第{attempt + 1}/{max_retries}次): "
                         f"{type(e).__name__}: {e}，{wait}s 后重试..."
@@ -117,7 +128,9 @@ class OpenaiCompatClient:
                     await asyncio.sleep(wait)
 
         if last_error is not None:
-            print(f"[ERROR] API 调用失败 (已重试{max_retries}次): {type(last_error).__name__}: {last_error}")
+            print(
+                f"[ERROR] API 调用失败 (已重试{max_retries}次): {type(last_error).__name__}: {last_error}"
+            )
             return ChatResponse(content="AI暂时无法响应，请稍后重试")
         """
         返回内容解析
@@ -155,7 +168,10 @@ class OpenaiCompatClient:
         # 优雅降级为可读消息返回给上层，避免 data["choices"] 抛 KeyError 导致整个会话崩溃
         if "choices" not in data or not data.get("choices"):
             error_info = data.get("error") or {}
-            err_msg = error_info.get("message") or f"HTTP {resp.status_code}: {str(data)[:200]}"
+            err_msg = (
+                error_info.get("message")
+                or f"HTTP {resp.status_code}: {str(data)[:200]}"
+            )
             print(f"[ERROR] 模型服务返回错误: {err_msg}")
             return ChatResponse(content=f"模型返回错误：{err_msg}")
 
@@ -163,20 +179,19 @@ class OpenaiCompatClient:
         message = data["choices"][0]["message"]
         return ChatResponse(
             # 工具调用的话可能content为None所以改用.get来处理None
-            content = message.get("content"),
-            model = data["model"],
-            finish_reason = data["choices"][0]["finish_reason"],
-            prompt_tokens = usage.get("prompt_tokens", 0),
-            completion_tokens = usage.get("completion_tokens", 0),
+            content=message.get("content"),
+            model=data["model"],
+            finish_reason=data["choices"][0]["finish_reason"],
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
             # 输入缓存命中 token（DeepSeek/OpenAI 缓存机制）
-            cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
-            tool_calls = message.get("tool_calls"),
+            cached_tokens=(usage.get("prompt_tokens_details") or {}).get(
+                "cached_tokens", 0
+            ),
+            tool_calls=message.get("tool_calls"),
             # 思考模式推理内容，供多轮/工具调用时回传
-            reasoning_content = message.get("reasoning_content"),
+            reasoning_content=message.get("reasoning_content"),
         )
-
 
     async def close(self):
         await self._client.aclose()
-
-

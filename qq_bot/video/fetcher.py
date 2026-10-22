@@ -77,6 +77,33 @@ def _ytdlp_format() -> str:
     return "bv*[height<=480]+ba/b[height<=480]/b"
 
 
+def _cookie_pairs(cookie: str) -> list[tuple[str, str]]:
+    cookie = (cookie or "").strip()
+    if not cookie:
+        return []
+    if "=" not in cookie:
+        return [("SESSDATA", cookie)]
+    pairs: list[tuple[str, str]] = []
+    for item in cookie.split(";"):
+        key, _, value = item.strip().partition("=")
+        if key and value:
+            pairs.append((key.strip(), value.strip()))
+    return pairs
+
+
+def _write_bilibili_cookie_file(cookie: str, dest_dir: Path) -> Path | None:
+    """把 BILIBILI_COOKIE 转成 yt-dlp 能读的 Netscape cookie 文件。"""
+    pairs = _cookie_pairs(cookie)
+    if not pairs:
+        return None
+    path = dest_dir / "bilibili-cookies.txt"
+    lines = ["# Netscape HTTP Cookie File", ""]
+    for key, value in pairs:
+        lines.append(f".bilibili.com\tTRUE\t/\tFALSE\t0\t{key}\t{value}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 async def _run_ytdlp(url: str, dest_dir: Path, config: VideoConfig) -> str:
     binary = config.ytdlp
     if shutil.which(binary) is None:
@@ -96,8 +123,12 @@ async def _run_ytdlp(url: str, dest_dir: Path, config: VideoConfig) -> str:
         "-o",
         template,
     ]
-    if config.ytdlp_cookies:
-        cmd.extend(["--cookies", config.ytdlp_cookies])
+    cookie_file = config.ytdlp_cookies
+    if not cookie_file and "bilibili.com" in url:
+        generated = _write_bilibili_cookie_file(config.bilibili_cookie, dest_dir)
+        cookie_file = str(generated) if generated is not None else ""
+    if cookie_file:
+        cmd.extend(["--cookies", cookie_file])
     if "bilibili.com" in url:
         cmd.extend(["--referer", "https://www.bilibili.com/"])
     cmd.append(url)
@@ -160,6 +191,13 @@ async def fetch_with_ytdlp(
     await _run_ytdlp(source.url, dest_dir, config)
     path = _find_media_file(dest_dir)
     info = _read_info(dest_dir)
+    logger.info(
+        "视频下载完成: platform=%s path=%s size=%dB format=%s",
+        source.platform,
+        path.name,
+        path.stat().st_size,
+        info.get("format_id") or info.get("format") or "?",
+    )
     return FetchedVideo(
         path=str(path),
         title=str(info.get("title") or ""),

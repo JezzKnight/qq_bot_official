@@ -233,3 +233,77 @@
 - 字幕是性价比最高的语音信息源；拿不到字幕时应明确降级，而不是偷偷
   用一个没部署的 ASR 造成“看起来能分析”的假象。
 
+
+
+## 2026-10-22 · 修复：视频抽帧黑屏与 B 站字幕错配
+
+> 本节是对上一节“视频理解工具”的实测修正。上一节写的 `x/player/v2`
+> 和“最多 12 帧”已被真实视频验证推翻，以本节为准。
+
+**问题现象**
+
+用户发 B 站视频后，模型只看到片头/片尾的黑屏或转场，且始终没有字幕；
+一次 1 分钟视频约 9 秒、4.5 分钟视频约 14 秒就返回，看起来像“根本没处理视频”。
+
+**根因 1：scdet 输出被 4KB 截断**
+
+`qq_bot/video/frames.py` 的 `_run()` 曾对所有子进程统一 `max_output=4000`。
+但 `ffmpeg -vf scdet=...,metadata=print` 会逐帧打印 `pts_time`，4.5 分钟视频的
+输出远超 4KB；截断后只解析到前 2 秒，`select_frame_times()` 又只保留
+`[0, duration-0.1]`，最终必然只抽到开头和结尾两帧。
+
+修复：
+- `_run(..., max_output=...)` 允许调用方关闭截断；scdet 传 `None`。
+- `parse_scdet_times()` 优先解析 `lavfi.scd.time`，否则用
+  `lavfi.scd.score >= threshold` 过滤，不再把每一帧都当场景。
+- `select_frame_times()` 改为按时间分桶：每桶优先取场景点，没有场景点取桶中心；
+  目标帧数 `min(max_frames, max(4, duration//10+1))`。即使 scdet 完全失败，
+  也会覆盖整段视频。
+- 真实 4.5 分钟视频验证：21 个场景点，最终 8 帧，画面不再是黑屏。
+
+**根因 2：`x/player/v2` 的字幕会错配**
+
+实测同一个 BV 号、带 Cookie 请求 `x/player/v2`，不同参数组合返回了
+TED-Ed 环保诗、脑科学、JK 短剧、西游记等完全无关的字幕。`subtitle_url`
+存在并不代表字幕属于这个视频，直接下载会把错误文本喂给视觉模型。
+
+修复：
+- 改用 `/x/player/wbi/v2`，先请求 `/x/web-interface/nav` 取 `wbi_img`，
+  用 B 站 64 项混淆表生成 `mixin_key`，再计算 `wts + w_rid` 签名。
+- 不再回退旧的 `x/player/v2`；拿不到就明确降级为纯关键帧，不启动 ASR。
+- 真实 BV 验证：WBI 返回 2280 字正确字幕（“观前提醒 / 万圣暗猫……”），
+  与画面一致；旧接口返回的错配字幕被彻底绕过。
+
+**根因 3：Cookie 只给了字幕，没有给 yt-dlp**
+
+`BILIBILI_COOKIE` 原先只用于字幕请求；yt-dlp 只认 `VIDEO_YTDLP_COOKIES`
+文件，所以“填了 Cookie”对下载仍然无效。修复：把 `SESSDATA=...` 转成临时
+Netscape cookie 文件，下载时传 `--cookies`；登录态验证 `isLogin=True`。
+
+**速度结论**
+
+- 修复前：12 帧 + 3000 字字幕，DeepSeek 首次把 3600 token 全花在 reasoning，
+  content 为空，重试后总耗时 42.3s。
+- 优化后：8 帧 + 6000 字上限 + `reasoning_effort="low"`，真实视频 20.27s；
+  6 帧 21.73s（推理量反而波动），4 帧测试遇到 yt-dlp 临时超时，未采用。
+- 对比 `glm-5.3-flash`：12 帧/12756 字字幕、15006 prompt token、91.4s，
+  不适合作为默认视频模型。
+- 20s 是当前 DeepSeek 视觉链路的实际下限；想再快只能换非 reasoning 视觉模型、
+  并行分帧或继续减少帧/字幕。
+
+**测试**
+
+- `tests/test_video_pipeline.py` 15 passed；全量 `pytest -q` 130 passed。
+- 新增 WBI 标准示例测试（mixin key `ea1db124af3c7062474693fa704f4ff8`）、
+  WBI 请求带 Cookie/`w_rid` 测试、无字幕提示测试。
+- 视频相关定向 `ruff check` 通过；`qq_bot/ai/openai_client.py` 仍有
+  改动前既有 lint 问题，本次只新增 `reasoning_effort` 参数，不扩大范围修。
+
+**复盘启示**
+
+- 子进程日志/元数据输出不能用固定小上限截断；先确认输出协议，再决定是否
+  采样或落文件。`scdet` 这种“逐帧 metadata”尤其容易踩坑。
+- 平台接口“有 URL”不等于“内容正确”。B 站字幕这类接口必须用官方签名
+  （WBI）和真实视频交叉验证，否则会静默喂错数据。
+- 视觉模型的 reasoning token 会吃掉输出预算；对视频这种高 prompt 场景，
+  应显式限制推理强度或换非 reasoning 模型，不能只看单次调用耗时。
