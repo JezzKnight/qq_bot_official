@@ -7,7 +7,7 @@ class AiChatConfig(BaseModel):
     # 本类只保留与模型无关的运行时配置，密钥经 .env 注入环境变量。
 
     # ── 记忆设置（窗口/压缩参数见 memory.yaml）──
-    max_context_tokens: int = 8192                 # 上下文总 token 上限
+    max_context_tokens: int = 16384                 # 上下文总 token 上限
 
     # ── 动态记忆注入 ──
     memory_injection_enabled: bool = True  # 群聊动态注入总开关
