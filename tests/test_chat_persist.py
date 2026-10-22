@@ -52,3 +52,22 @@ async def test_persist_skips_when_memory_missing() -> None:
         user_text="a",
         assistant_text="b",
     )
+
+
+async def test_persist_writes_extra_assistant_note(repo) -> None:
+    thread_id = await repo.ensure_thread("private", None, "U-extra")
+    await persist_turn(
+        repo,
+        thread_id=thread_id,
+        group_id=None,
+        sender_id="U-extra",
+        sender_name="测试",
+        user_text="看看这个视频",
+        assistant_text="看完了",
+        extra_assistant_text="[视频分析记录]\n标题：测试视频\n暗猫是碧蓝幻想角色",
+    )
+    rows = await repo.pool.fetch(
+        "SELECT role, content FROM messages WHERE thread_id=$1 ORDER BY id", thread_id
+    )
+    assert [r["role"] for r in rows] == ["user", "assistant", "assistant"]
+    assert "暗猫是碧蓝幻想角色" in rows[2]["content"]

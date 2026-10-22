@@ -307,3 +307,64 @@ Netscape cookie 文件，下载时传 `--cookies`；登录态验证 `isLogin=Tru
   （WBI）和真实视频交叉验证，否则会静默喂错数据。
 - 视觉模型的 reasoning token 会吃掉输出预算；对视频这种高 prompt 场景，
   应显式限制推理强度或换非 reasoning 模型，不能只看单次调用耗时。
+
+
+## 2026-10-22 · 修复：看过视频后下一轮“失忆”
+
+**问题现象**
+
+用户在 21:22 发 B 站视频，bot 正常抽帧、拿字幕并回复“碧蓝幻想的万圣节角色
+评测 暗猫被夸上天…”，数据库也写入了这条回复。22:10 用户问“暗猫是谁”，
+bot 调 `query_chat_history` 失败两次，随后连续回答“不认识/我记性不太好”。
+
+**根因 1：token 估算把 system prompt 放大了一倍，裁掉了整段个人线程**
+
+`qq_bot/memory/token_est.py` 旧实现按“中文 2 token/字”估算。实际 system
+prompt 5326 字，估算 7886 token；加上群窗口 493、个人线程 568、群摘要 486，
+总估算 8956 token，超过 `max_context_tokens=8192`。
+
+`trim_messages()` 从最旧对话开始裁，先裁群窗口，再裁个人线程。视频那一轮
+（id 153/154）正好是个人线程最旧的消息，被裁掉；最后只剩 22:10-22:12 的
+“不认识/记性不好”几轮，模型自然继续否认。
+
+修复后按“中文 1 token/字”估算，同一请求估算约 5.5k token，34 条消息全部
+保留；DeepSeek 实际 `prompt_tokens=4894`，证明旧估算过于保守。
+
+**根因 2：`query_chat_history` 的 SQL 把 openid 当 bigint**
+
+`qq_bot/memory/pg_repo.py:messages_by_date()` 写的是
+`WHERE ($1::bigint IS NULL OR group_id = $1)`，但 v009 迁移后
+`messages.group_id` 是 TEXT openid。传 `C69128F...` 会直接报
+`invalid input syntax for type bigint`，所以用户追问时两次查询都失败。
+
+修复：改为 `$1::text`；新增 openid 群消息按日期查询的回归测试。
+
+**根因 3：完整视频分析只活在当前轮的 tool 消息里**
+
+`persist_turn()` 只写 user + assistant 两条；`watch_video` 返回的完整分析
+（标题、时间线、字幕、画面描述）在本轮结束后丢弃。下一轮即使保留最终回复，
+也只剩一句“暗猫被夸…”，不足以回答“暗猫是谁”。
+
+修复：`persist_turn()` 新增可选的 `extra_assistant_text`，`run_turn()` 把
+`watch_video` 的结果截到 1600 字，以 `[视频分析记录，仅供后续对话参考]`
+写入个人线程；这条消息不发送给用户，只用于后续上下文。日志增加
+`TURN video note chars=...`，方便确认是否写入。
+
+**验证**
+
+- 全量 `pytest -q`：133 passed。
+- 用真实 system prompt + 最近 12 条线程重放：修复前 34 条被裁到 5 条；
+  修复后 34 条全保留，`prompt_tokens=4894`。
+- 仅修复估算后，模型能看到旧回复但仍说“我瞎编的”；插入一条视频分析记录后，
+  同一 prompt 正确回答“暗猫是碧蓝幻想那个万圣节暗属性角色，视频里说很强、
+  打 10 分推荐抽”。说明“保留最终回复”和“保留分析证据”缺一不可。
+- `messages_by_date` openid 测试通过；`persist_turn` 额外笔记测试通过。
+
+**复盘启示**
+
+- 上下文预算的 token 估算必须贴近真实 tokenizer。过度保守的估算不是“安全”，
+  而是会把最需要的历史裁掉；估算器本身要有回归测试。
+- 用户说“失忆”时，先查“消息是否落库”和“落库后是否被裁掉”，不要先怪模型。
+- 工具产生的中间分析如果对后续对话有价值，就要显式持久化；只存最终回复
+  等于把证据丢了。持久化时用“仅供后续参考”的标记，避免模型把它当成用户可见发言。
+- openid 改造后所有 SQL 参数类型都要重新检查，`$1::bigint` 这种旧写法很容易漏。

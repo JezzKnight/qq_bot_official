@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from qq_bot.memory.memory_config import BudgetConfig, MemoryConfig, ShortTermConfig
 
 
@@ -22,11 +25,18 @@ async def test_ensure_thread_is_idempotent_for_group(repo) -> None:
 async def test_append_and_history_ordered(repo) -> None:
     tid = await repo.ensure_thread("group_member", "G100", "U7")
     await repo.append(
-        thread_id=tid, group_id="G100", sender_id="U7", role="user",
-        content="第一句", sender_name="小明",
+        thread_id=tid,
+        group_id="G100",
+        sender_id="U7",
+        role="user",
+        content="第一句",
+        sender_name="小明",
     )
     await repo.append(
-        thread_id=tid, group_id="G100", sender_id=None, role="assistant",
+        thread_id=tid,
+        group_id="G100",
+        sender_id=None,
+        role="assistant",
         content="第一句回复",
     )
     history = await repo.history(tid, 10)
@@ -39,15 +49,43 @@ async def test_group_window_excludes_own_thread(repo) -> None:
     mine = await repo.ensure_thread("group_member", "G100", "U7")
     other = await repo.ensure_thread("group_member", "G100", "U8")
     await repo.append(
-        thread_id=mine, group_id="G100", sender_id="U7", role="user",
-        content="我说的", sender_name="小明",
+        thread_id=mine,
+        group_id="G100",
+        sender_id="U7",
+        role="user",
+        content="我说的",
+        sender_name="小明",
     )
     await repo.append(
-        thread_id=other, group_id="G100", sender_id="U8", role="user",
-        content="别人说的", sender_name="阿强",
+        thread_id=other,
+        group_id="G100",
+        sender_id="U8",
+        role="user",
+        content="别人说的",
+        sender_name="阿强",
     )
     window = await repo.group_window("G100", mine, 10)
     assert [m.content for m in window] == ["别人说的"]
+
+
+async def test_messages_by_date_supports_openid_group(repo) -> None:
+    tid = await repo.ensure_thread(
+        "group_member", "C69128F2D1D26F8285AAF24C0BA3576F", "U7"
+    )
+    await repo.append(
+        thread_id=tid,
+        group_id="C69128F2D1D26F8285AAF24C0BA3576F",
+        sender_id="U7",
+        role="user",
+        content="openid 群消息",
+        sender_name="小明",
+    )
+    rows = await repo.messages_by_date(
+        date_str=datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat(),
+        limit=10,
+        group_id="C69128F2D1D26F8285AAF24C0BA3576F",
+    )
+    assert any(row["content"] == "openid 群消息" for row in rows)
 
 
 async def test_clear_thread_isolated(repo) -> None:
@@ -69,12 +107,20 @@ async def test_build_context_does_not_overlap(repo) -> None:
     mine = await repo.ensure_thread("group_member", "G100", "U7")
     other = await repo.ensure_thread("group_member", "G100", "U8")
     await repo.append(
-        thread_id=mine, group_id="G100", sender_id="U7", role="user",
-        content="我的消息", sender_name="小明",
+        thread_id=mine,
+        group_id="G100",
+        sender_id="U7",
+        role="user",
+        content="我的消息",
+        sender_name="小明",
     )
     await repo.append(
-        thread_id=other, group_id="G100", sender_id="U8", role="user",
-        content="他的消息", sender_name="阿强",
+        thread_id=other,
+        group_id="G100",
+        sender_id="U8",
+        role="user",
+        content="他的消息",
+        sender_name="阿强",
     )
     cfg = MemoryConfig(
         short_term=ShortTermConfig(group_window=10, thread_window=10),

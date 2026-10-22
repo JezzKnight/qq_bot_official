@@ -12,10 +12,10 @@ _CJK = re.compile(r"[\u4e00-\u9fff]")
 
 
 def estimate_tokens(text: str | None) -> int:
-    """粗估 token：中文 2/字，英文 1.3/词。"""
+    """粗估 token：中文 1/字，英文 1.3/词。"""
     if not text:
         return 0
     chinese = len(_CJK.findall(text))
     non_chinese = _CJK.sub(" ", text)
     english_words = len(non_chinese.split())
-    return int(chinese * 2 + english_words * 1.3)
+    return int(chinese + english_words * 1.3)

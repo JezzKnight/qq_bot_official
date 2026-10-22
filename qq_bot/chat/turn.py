@@ -62,6 +62,7 @@ def _compression_scheduler(incoming: Incoming):
 
 
 MAX_TOOL_ROUNDS = 5
+MAX_VIDEO_NOTE_CHARS = 1600
 FALLBACK_TEXT = "AI暂时无法响应，请稍后重试"
 
 
@@ -219,6 +220,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     search_called = False
     search_retried = False
     video_ack_sent = False
+    video_notes: list[str] = []
     last_search_query = ""
     reply_parts_used = 0
     final_content = FALLBACK_TEXT
@@ -314,6 +316,12 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
                     except Exception:
                         logger.warning("视频处理提示发送失败，继续分析", exc_info=True)
                 result = await tool["func"](**args)
+                if (
+                    func["name"] == "watch_video"
+                    and result
+                    and not result.startswith(("视频获取失败", "视频抽帧失败"))
+                ):
+                    video_notes.append(result)
 
             messages.append(
                 ChatMessage(role="tool", content=result, tool_call_id=tc["id"])
@@ -323,6 +331,11 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
 
     pending_sticker = current_pending_sticker.get()
     current_pending_sticker.set(None)
+    video_note = "\n\n".join(video_notes)
+    if len(video_note) > MAX_VIDEO_NOTE_CHARS:
+        video_note = video_note[:MAX_VIDEO_NOTE_CHARS] + "…"
+    if video_note:
+        logger.info("TURN video note chars=%d", len(video_note))
     logger.info("TURN persist start")
     await persist_turn(
         memory,
@@ -332,6 +345,9 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
         sender_name=sender_name,
         user_text=f"{identity_tag}\n{incoming.text}",
         assistant_text=final_content,
+        extra_assistant_text=(
+            f"[视频分析记录，仅供后续对话参考]\n{video_note}" if video_note else None
+        ),
         usage=usage_context.snapshot(),
         model=model_name,
         sticker=pending_sticker[0] if pending_sticker is not None else None,

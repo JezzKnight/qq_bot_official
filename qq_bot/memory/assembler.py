@@ -8,10 +8,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .token_est import estimate_tokens
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from qq_bot.ai.types import ChatMessage
@@ -80,8 +83,18 @@ def trim_messages(messages: list[ChatMessage], budget: int) -> list[ChatMessage]
     if len(messages) <= _MIN_KEEP:
         return messages
     result = list(messages)
+    before = len(result)
     total = sum(estimate_tokens(m.content) for m in result)
     while total > budget and len(result) > _MIN_KEEP:
         total -= estimate_tokens(result[1].content)
         result.pop(1)
+    if len(result) < before:
+        logger.warning(
+            "上下文超出预算，裁剪 %d 条消息（%d -> %d，估算 %d tokens，预算 %d）",
+            before - len(result),
+            before,
+            len(result),
+            total,
+            budget,
+        )
     return result

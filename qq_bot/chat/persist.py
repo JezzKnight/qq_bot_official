@@ -1,4 +1,4 @@
-"""一轮对话的落库：用户 + assistant 两条，含 token 用量与表情元数据。"""
+"""一轮对话的落库：用户 + assistant，可附一条不发送给用户的工具分析笔记。"""
 
 from __future__ import annotations
 
@@ -15,11 +15,12 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
     memory: Any,
     *,
     thread_id: int | None,
-    group_id: int | None,
+    group_id: str | None,
     sender_id: int,
     sender_name: str,
     user_text: str,
     assistant_text: str,
+    extra_assistant_text: str | None = None,
     sticker: str | None = None,
     usage: Any | None = None,
     model: str | None = None,
@@ -50,6 +51,16 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
             llm_calls=usage.calls if usage else 0,
             model=model,
         )
+        if extra_assistant_text:
+            # 工具产生的长分析不发送给用户，但必须进入线程，否则下一轮只剩
+            # 一句很短的最终回复，模型会“忘记”自己看过什么。
+            await memory.append(
+                thread_id=thread_id,
+                group_id=group_id,
+                sender_id=None,
+                role="assistant",
+                content=extra_assistant_text,
+            )
         if group_id is not None and schedule is not None:
             # 摘要压缩异步执行，不进入用户等待路径
             schedule(group_id)

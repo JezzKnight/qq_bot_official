@@ -46,9 +46,7 @@ class PgRepository:
 
     # ── 线程 ──────────────────────────────────────────────
 
-    async def ensure_thread(
-        self, kind: str, group_id: str | None, user_id: str
-    ) -> int:
+    async def ensure_thread(self, kind: str, group_id: str | None, user_id: str) -> int:
         """取或建线程，并刷新活跃时间。"""
         row = await self.pool.fetchrow(
             """
@@ -162,7 +160,7 @@ class PgRepository:
             """
             SELECT role, sender_name, content, created_at
               FROM messages
-             WHERE ($1::bigint IS NULL OR group_id = $1)
+             WHERE ($1::text IS NULL OR group_id = $1)
                AND ($2::bigint IS NULL OR thread_id = $2)
                AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = $3::text::date
              ORDER BY id ASC LIMIT $4
@@ -387,7 +385,6 @@ class PgRepository:
         )
         return [dict(r) for r in rows]
 
-
     # ── 称呼 ─────────────────────────────────────────────
 
     async def list_names(self, group_id: str | None) -> list[dict[str, Any]]:
@@ -420,9 +417,7 @@ class PgRepository:
         )
         return dict(row) if row else None
 
-    async def set_preferred_name(
-        self, user_id: str, name: str, name_key: str
-    ) -> None:
+    async def set_preferred_name(self, user_id: str, name: str, name_key: str) -> None:
         """改名：删旧别名 → 当前 preferred 降级为别名 → 写入新 preferred。
 
         任何时刻每位用户最多 1 个 preferred + 1 个旧别名（由部分唯一索引保证）。
