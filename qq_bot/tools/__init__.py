@@ -1,4 +1,5 @@
 """工具注册入口：导入即触发 register_tool，并聚合导出全部工具与上下文符号。"""
+
 from .batch_search import batch_search
 from .context import (
     SearchTracker,
@@ -7,6 +8,7 @@ from .context import (
     current_scope,
     current_search_tracker,
     current_sender_name,
+    current_videos,
 )
 from .query_chat_history import query_chat_history
 from .recall_memory import recall_memory
@@ -17,6 +19,7 @@ from .search_agent_tool import search_agent
 from .search_tool import search
 from .send_sticker import send_sticker
 from .set_my_name import set_my_name
+from .video_tool import watch_video
 from .web_fetch import web_fetch_by_tavily
 from .web_search import web_search_by_tavily
 
@@ -29,6 +32,7 @@ __all__ = [
     "current_scope",
     "current_search_tracker",
     "current_sender_name",
+    "current_videos",
     "get_tools_schema",
     "query_chat_history",
     "recall_memory",
@@ -39,6 +43,7 @@ __all__ = [
     "search_agent",
     "send_sticker",
     "set_my_name",
+    "watch_video",
     "web_fetch_by_tavily",
     "web_search_by_tavily",
 ]

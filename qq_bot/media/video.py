@@ -1,18 +1,24 @@
-"""从文本中识别视频链接（按扩展名判定），供各平台适配器复用。"""
+"""从文本中识别视频链接，供各平台适配器复用。
+
+直链按扩展名识别；B 站/抖音按平台 URL 规则识别（包括短链）。
+"""
 
 from __future__ import annotations
 
-import re
+from qq_bot.video.source import (
+    VIDEO_EXTENSIONS,
+    is_bilibili_url,
+    is_direct_video_url,
+    is_douyin_url,
+    is_video_url,
+    video_urls_in_text,
+)
 
-URL_PATTERN = re.compile(r"https?://[^\s<>\"'，。；、]+", re.IGNORECASE)
-VIDEO_EXTENSIONS = ("mp4", "webm", "mov", "mkv", "avi", "m4v", "3gp", "flv", "m3u8")
-
-
-def video_urls_in_text(text: str) -> list[str]:
-    """返回文本中所有指向视频文件的 URL。"""
-    urls: list[str] = []
-    for url in URL_PATTERN.findall(text or ""):
-        path = url.split("?", 1)[0].split("#", 1)[0].rstrip("/").lower()
-        if path.endswith(VIDEO_EXTENSIONS):
-            urls.append(url)
-    return urls
+__all__ = [
+    "VIDEO_EXTENSIONS",
+    "is_bilibili_url",
+    "is_direct_video_url",
+    "is_douyin_url",
+    "is_video_url",
+    "video_urls_in_text",
+]

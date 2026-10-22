@@ -2,6 +2,8 @@ import contextvars
 from typing import TypedDict
 
 from qq_bot.ai.types import ImageData
+from qq_bot.platform.ports import MediaRef
+
 
 class SearchTracker(TypedDict):
     """子 Agent 搜索过程中累积的 Tavily 调用状态"""
@@ -22,6 +24,10 @@ current_search_tracker: contextvars.ContextVar[SearchTracker | None] = (
 # 否则工具拿不到图——主模型只看到内容，看不到可引用的图片对象（note §61.2 第 3 条）。
 current_images: contextvars.ContextVar[list[ImageData] | None] = contextvars.ContextVar(
     "current_images", default=None
+)
+# 当前消息里的视频引用：主模型只看到提示文字，视频工具通过这个句柄取实际 URL。
+current_videos: contextvars.ContextVar[list[MediaRef] | None] = contextvars.ContextVar(
+    "current_videos", default=None
 )
 # 本轮待发送的表情包 (name, bytes)：工具只入队，handler 在文字之后真正发出，
 # 保证"先说话再发表情"的顺序（工具执行时文字还没生成完）

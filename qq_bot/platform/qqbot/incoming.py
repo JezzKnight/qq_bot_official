@@ -11,6 +11,7 @@ import os
 from typing import Any
 
 from qq_bot.platform.ports import Incoming, MediaRef, PlatformCaps, ReplyTarget
+from qq_bot.video.source import urls_from_payload, video_urls_in_text
 
 _FULL_GROUP = os.getenv("QQ_GROUP_FULL_MESSAGES", "false").strip().lower() in {
     "1",
@@ -39,10 +40,7 @@ def mentions_me(event: Any) -> bool:
         message = event.get_message()
     except Exception:  # noqa: BLE001 —— 没有消息体时按未 @ 处理
         return False
-    return any(
-        seg.type == "mention_user" and seg.data.get("is_bot")
-        for seg in message
-    )
+    return any(seg.type == "mention_user" and seg.data.get("is_bot") for seg in message)
 
 
 def is_group_trigger(event: Any) -> bool:
@@ -81,7 +79,37 @@ def _quoted_prefix(event: Any) -> str:
         parts.append(f"[{img_count} 张图片]")
     if not parts:
         return ""
-    return f'[用户引用了 {name} 的消息：{"，".join(parts)}]\n'
+    return f"[用户引用了 {name} 的消息：{'，'.join(parts)}]\n"
+
+
+def _append_video(media: list[MediaRef], url: str) -> None:
+    if url and all(ref.url != url for ref in media):
+        media.append(MediaRef(kind="video", url=url))
+
+
+def _collect_videos(segments: list[Any], quoted: Any) -> list[MediaRef]:
+    media: list[MediaRef] = []
+    for seg in segments:
+        url = str(seg.data.get("url") or "")
+        content_type = str(seg.data.get("content_type") or "").lower()
+        is_video_file = seg.type == "file" and content_type.startswith("video/")
+        if (seg.type == "video" and url) or (is_video_file and url):
+            _append_video(media, url)
+        elif seg.type == "ark":
+            # 转发卡片/小程序卡片：jump_url、url、preview 里可能带 B 站/抖音链接。
+            for card_url in urls_from_payload(seg.data):
+                _append_video(media, card_url)
+        # 部分客户端把视频放在 text 里，或文字里直接贴了链接。
+        if seg.type == "text":
+            for text_url in video_urls_in_text(str(seg.data.get("text") or "")):
+                _append_video(media, text_url)
+
+    for item in getattr(quoted, "attachments", None) or []:
+        content_type = str(getattr(item, "content_type", "") or "").lower()
+        url = str(getattr(item, "url", "") or "")
+        if content_type.startswith("video/") and url:
+            _append_video(media, url)
+    return media
 
 
 def from_event(event: Any, *, reply: ReplyTarget) -> Incoming:
@@ -99,12 +127,18 @@ def from_event(event: Any, *, reply: ReplyTarget) -> Incoming:
         segments = list(event.get_message())
     except ValueError:
         segments = []
+
+    # 图片
     for seg in segments:
         url = seg.data.get("url")
         if seg.type == "image" and url:
             media.append(MediaRef(kind="image", url=str(url)))
-        elif seg.type == "video" and url:
-            media.append(MediaRef(kind="video", url=str(url)))
+
+    # 视频文件、转发卡片、文本里的视频链接
+    videos = _collect_videos(segments, getattr(event, "reply", None))
+    for ref in videos:
+        if ref.url and all(existing.url != ref.url for existing in media):
+            media.append(ref)
 
     # 引用消息里的图片：event.reply.attachments 带 url，但不会出现在当前消息段里；
     # 追加到 media，下载后一起交给视觉模型，文字前缀仍保留“[N 张图片]”说明来源。
@@ -117,9 +151,12 @@ def from_event(event: Any, *, reply: ReplyTarget) -> Incoming:
             if all(ref.url != quoted_url for ref in media):
                 media.append(MediaRef(kind="image", url=quoted_url))
 
-    text = _quoted_prefix(event) + "".join(
-        seg.data.get("text", "") for seg in segments if seg.type == "text"
-    ).strip()
+    text = (
+        _quoted_prefix(event)
+        + "".join(
+            seg.data.get("text", "") for seg in segments if seg.type == "text"
+        ).strip()
+    )
 
     return Incoming(
         user_key=user_key,

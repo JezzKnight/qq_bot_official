@@ -45,12 +45,12 @@ from qq_bot.tools import (
     current_scope,
     current_search_tracker,
     current_sender_name,
+    current_videos,
     get_tools_schema,
 )
 from qq_bot.tools.search_tool import retry_search
 
 if TYPE_CHECKING:
-
     from qq_bot.platform.ports import Incoming
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 def _compression_scheduler(incoming: Incoming):
     """看不到全量群消息时不做群摘要：否则摘要只覆盖 @ 对话，质量太差。"""
     return schedule_compress if incoming.caps.can_see_all_group_messages else None
+
 
 MAX_TOOL_ROUNDS = 5
 FALLBACK_TEXT = "AI暂时无法响应，请稍后重试"
@@ -103,6 +104,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     current_scope.set(scope)
     current_sender_name.set(sender_name)
     current_pending_sticker.set(None)
+    current_videos.set([])
     usage_context.reset()
 
     session_id = f"group_{gid}" if is_group else f"user_{uid}"
@@ -177,21 +179,24 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
 
     images = await _download_images(incoming)
     current_images.set(images)
-    video_urls = [
-        ref.url for ref in incoming.images if ref.kind == "video" and ref.url
-    ]
-    current_call = (
-        await memory.preferred_name(uid) if memory is not None else None
-    )
+    # 视频不再塞进 media_urls（那会被模型当成 image_url 发出去）；
+    # 改成工具上下文 + 一句提示，由主模型决定是否调用 watch_video。
+    video_refs = [ref for ref in incoming.images if ref.kind == "video" and ref.url]
+    current_videos.set(video_refs)
+    current_call = await memory.preferred_name(uid) if memory is not None else None
     call_attr = f' call="{escape_for_prompt(current_call)}"' if current_call else ""
     identity_tag = f'<user identity id="{uid}" name="{sender_name}"{call_attr}/>'
+    user_content = f"{identity_tag}\n{incoming.text}"
+    if video_refs:
+        user_content += (
+            "\n[用户发送了视频或视频链接；需要理解视频内容时调用 watch_video 工具]"
+        )
     messages.append(
         ChatMessage(
             role="user",
-            content=f"{identity_tag}\n{incoming.text}",
+            content=user_content,
             sender_name=sender_name,
             images=images or None,
-            media_urls=video_urls or None,
         )
     )
     messages = trim_messages(messages, config.max_context_tokens)
@@ -204,6 +209,8 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
         "query_chat_history",
         "set_my_name",
     ]
+    if video_refs:
+        tool_names.append("watch_video")
     # 没有表情目录（如 QQ 模式未同步）或平台不能发图时不暴露相关工具
     if sticker_catalog and incoming.caps.can_send_image:
         tool_names.append("send_sticker")

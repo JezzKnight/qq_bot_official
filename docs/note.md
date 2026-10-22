@@ -177,3 +177,59 @@
 - “没查到”不一定是数据不存在，可能是实体/赛事名假设错误；补查的核心是
   **改写 query**，不是原 query 再搜一次。
 - 重试必须有硬上限和明确触发条件；否则会把一次 3 秒的回答拖成多次搜索。
+
+## 2026-10-22 · 功能：视频理解工具（ffmpeg + yt-dlp + B 站 CC）
+
+**目标**
+
+- 用户发来 QQ 视频文件、B 站/抖音链接或转发卡片时，让主模型能“看”视频：
+  画面用 ffmpeg 场景检测抽关键帧，语音优先用视频自带 CC 字幕，不额外部署 ASR。
+
+**实现要点**
+
+- 来源归一化：直链按扩展名；B 站识别 `BV/av/b23.tv`；抖音识别
+  `douyin.com/video` 与 `v.douyin.com`；QQ `video`/`file` 段和 `ark` 转发卡片
+  都走同一套 URL 提取。
+- 获取：直链用 `httpx` 流式下载并限制 80MB；平台页交给 yt-dlp，
+  低清优先（`height<=480`），临时目录在分析结束后删除。
+- 抽帧：`ffmpeg -vf scdet=threshold=10,metadata=print:file=-` 解析
+  `pts_time`，场景点均匀取样，最多 12 帧；scdet 失败时回退等间隔抽帧。
+  每帧单独 `-ss` 抽 JPEG，缩放到 768px 宽，避免把整段视频解码进内存。
+- 字幕：`x/web-interface/view` 取 cid，`x/player/v2` 取字幕列表，
+  再下载 `subtitle_url` 的 JSON，按 `from/content` 转成 `[mm:ss] 文本`。
+- 分析：字幕 + 带时间戳关键帧一起交给视觉模型，输出总结/时间线/
+  针对问题的回答/不确定信息；没有字幕时明确提示“不要假装听见”。
+- 接入：视频不再塞进 `media_urls`（否则会被当成 `image_url`）；
+  改为 `current_videos` + 提示，只有当前消息有视频时才向主模型暴露
+  `watch_video` 工具。
+
+**B 站 CC 字幕的实测事实（2026-10）**
+
+- `x/web-interface/view` 匿名可用，返回 bvid/aid/cid/title/duration。
+- `x/player/v2` 匿名通常返回 `subtitle.subtitles=[]`，并带
+  `need_login_subtitle=true`；登录 Cookie 才可能拿到 AI 字幕。
+- UP 主公开的 CC 字幕在部分视频匿名可见，所以代码不预设“一定没有”，
+  有就下载，没有就降级为纯画面理解，不启动 ASR。
+- `subtitle_url` 可能以 `//aisubtitle...` 开头，需要补 `https:`；
+  字幕 JSON 的正文在 `body[].content`，时间在 `body[].from`。
+
+**验证与限制**
+
+- 视频/适配器相关测试共 25 个通过；本地 3 秒 testsrc 端到端通过：
+  3 帧、4.76s、视觉模型正常返回。
+- 真实视觉模型对 1 张图 500 token 可用；50 token 会被 reasoning 吃光，
+  因此视频分析保留至少 1600 token。
+- 当前限制：5 分钟/80MB、12 帧、无 ASR；抖音未重点验证；
+  B 站 AI 字幕需要 `BILIBILI_COOKIE`。
+- 安全：URL 只允许 http(s)，拒绝 localhost/私有 IP；直链下载限制大小，
+  yt-dlp 有超时；但 DNS rebinding 仍未做完整防护。
+
+**复盘启示**
+
+- “视频理解”不等于“把视频 URL 塞给视觉模型”；必须先区分直链和网页，
+  网页要解析元数据/字幕，视频文件才走 ffmpeg。
+- 抽帧的关键不是“每秒一张”，而是先找镜头切换，再在镜头内均匀取样；
+  否则长视频会被开头几秒占满。
+- 字幕是性价比最高的语音信息源；拿不到字幕时应明确降级，而不是偷偷
+  用一个没部署的 ASR 造成“看起来能分析”的假象。
+

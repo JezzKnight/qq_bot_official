@@ -144,9 +144,7 @@ def test_image_segment_becomes_media_ref() -> None:
         ],
     )
     incoming = from_event(event, reply=FakeReply())
-    assert [(m.kind, m.url) for m in incoming.images] == [
-        ("image", "https://x/a.png")
-    ]
+    assert [(m.kind, m.url) for m in incoming.images] == [("image", "https://x/a.png")]
 
 
 async def test_first_segment_is_passive_rest_are_active() -> None:
@@ -185,17 +183,13 @@ def test_group_at_event_is_trigger() -> None:
 
 
 def test_full_message_with_is_you_is_trigger() -> None:
-    event = FakeTypedEvent(
-        "GROUP_MESSAGE_CREATE", mentions=[FakeMention(is_you=True)]
-    )
+    event = FakeTypedEvent("GROUP_MESSAGE_CREATE", mentions=[FakeMention(is_you=True)])
     assert mentions_me(event) is True
     assert is_group_trigger(event) is True
 
 
 def test_full_message_without_mention_is_not_trigger() -> None:
-    event = FakeTypedEvent(
-        "GROUP_MESSAGE_CREATE", mentions=[FakeMention(is_you=False)]
-    )
+    event = FakeTypedEvent("GROUP_MESSAGE_CREATE", mentions=[FakeMention(is_you=False)])
     assert mentions_me(event) is False
     assert is_group_trigger(event) is False
 
@@ -246,3 +240,39 @@ def test_quoted_image_without_url_is_ignored() -> None:
     incoming = from_event(event, reply=FakeReply())
     assert incoming.images == []
     assert "[1 张图片]" in incoming.text
+
+
+def test_video_segment_and_text_link_become_video_refs() -> None:
+    event = FakeEvent(
+        group_openid="g",
+        message=[
+            FakeSeg("video", {"url": "https://multimedia.nt.qq.com.cn/video?id=1"}),
+            FakeSeg(
+                "text", {"text": "再看 https://www.bilibili.com/video/BV1xx411c7mD"}
+            ),
+        ],
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert [(m.kind, m.url) for m in incoming.images] == [
+        ("video", "https://multimedia.nt.qq.com.cn/video?id=1"),
+        ("video", "https://www.bilibili.com/video/BV1xx411c7mD"),
+    ]
+
+
+def test_forward_card_ark_segment_becomes_video_ref() -> None:
+    event = FakeEvent(
+        group_openid="g",
+        message=[
+            FakeSeg(
+                "ark",
+                {
+                    "prompt": "[分享] 视频",
+                    "meta": {"detail_1": {"qqdocurl": "https://b23.tv/abc123"}},
+                },
+            )
+        ],
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert [(m.kind, m.url) for m in incoming.images] == [
+        ("video", "https://b23.tv/abc123")
+    ]
