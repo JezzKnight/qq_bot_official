@@ -438,3 +438,40 @@ prompt 5326 字，估算 7886 token；加上群窗口 493、个人线程 568、�
 - 10 分钟是建议上限，不是硬拒绝；超过仍会处理，但结果里会带“超过建议上限”的提示。
 - 直链下载会硬性拒绝超过 160MB；B 站/抖音走 yt-dlp，目前没有单独的文件大小硬限制。
 - 帧数上限仍是 8；10 分钟视频会按时间分桶从场景点里取 8 帧。需要更细的覆盖时再调 `VIDEO_MAX_FRAMES`。
+
+
+## 2026-10-23 · 视频处理改为后台侧路
+
+**背景**
+
+- 视频下载、抽帧、字幕和视觉理解通常要 15-30 秒；原先 `run_turn` 在工具循环里
+  `await watch_video`，整个主对话被占住，用户感觉“没处理视频”，后续消息也要等。
+- 目标：先回一句“我去看看这个视频 稍等一下”，立刻释放主 turn；分析完成后单独回复，
+  并把完整分析记录写回线程。
+
+**实现**
+
+- 新增 `qq_bot/chat/video_background.py`：`VideoJob` + `start_video_job`，用
+  `asyncio.Task` 执行 `VideoAgent.analyze`，再用主模型把分析记录整理成回复；
+  发送走原 `ReplyTarget`，群聊首条被动、后续主动，超时/被动失效时回退主动消息。
+- `qq_bot/chat/turn.py`：检测到视频且 `video_background_enabled=true` 时，先
+  `passive` ack、`persist_user` 落用户消息，再启动后台任务并立即返回，不进入主模型
+  工具循环。`persist_turn` 拆成 `persist_user` + `persist_assistant`，后台完成时
+  只追加 assistant 和 `[视频分析记录]`。
+- `qq_bot/services/config.py` 新增 `video_background_enabled`（默认 true）；
+  关闭后回到原 `watch_video` 阻塞路径。
+- `.env.example` 与 README 同步说明。
+
+**边界**
+
+- 后台任务按 `(thread_id, message_id)` 去重，同一条消息不会启动两次。
+- 任务超时 420s；失败会发送“视频没看成”并照常落库，不会把异常抛给事件循环。
+- 用户消息先落库，后台 assistant 后落库；用户连续发消息时，线程顺序是“提交顺序”，
+  不是“完成顺序”，但不会丢消息。
+- 被动回复 5 分钟窗口：ack 和最终回复各占一次；若最终回复超过窗口，发送层回退主动消息。
+
+**验证**
+
+- 新增 `tests/test_video_background.py`：主 turn 不调用模型、立即返回 ack、用户消息落库；
+  后台任务生成回复、发送并写入分析笔记。
+- 全量 `pytest -q`：140 passed；改动文件 ruff 通过。

@@ -11,22 +11,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
+async def persist_user(  # noqa: PLR0913 —— 一行的完整列，拆开会更难读
     memory: Any,
     *,
     thread_id: int | None,
     group_id: str | None,
-    sender_id: int,
+    sender_id: str,
     sender_name: str,
     user_text: str,
-    assistant_text: str,
-    extra_assistant_text: str | None = None,
-    sticker: str | None = None,
-    usage: Any | None = None,
-    model: str | None = None,
-    schedule: Callable[[int], None] | None = None,
 ) -> None:
-    """落库一轮对话；失败只记日志，不影响已经生成的回复。"""
+    """只写用户消息；后台任务需要先把用户消息落库，再慢慢生成回复。"""
     if memory is None or thread_id is None:
         return
     try:
@@ -38,6 +32,26 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
             content=user_text,
             sender_name=sender_name,
         )
+    except Exception:
+        logger.exception("用户消息落库失败（不影响后续回复）")
+
+
+async def persist_assistant(  # noqa: PLR0913 —— 一行的完整列，拆开会更难读
+    memory: Any,
+    *,
+    thread_id: int | None,
+    group_id: str | None,
+    assistant_text: str,
+    extra_assistant_text: str | None = None,
+    sticker: str | None = None,
+    usage: Any | None = None,
+    model: str | None = None,
+    schedule: Callable[[str], None] | None = None,
+) -> None:
+    """只写 assistant 消息和可选的分析笔记；用户消息已由 persist_user 写入。"""
+    if memory is None or thread_id is None:
+        return
+    try:
         await memory.append(
             thread_id=thread_id,
             group_id=group_id,
@@ -65,4 +79,41 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
             # 摘要压缩异步执行，不进入用户等待路径
             schedule(group_id)
     except Exception:
-        logger.exception("对话落库失败（不影响本次回复）")
+        logger.exception("助手消息落库失败（不影响本次回复）")
+
+
+async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
+    memory: Any,
+    *,
+    thread_id: int | None,
+    group_id: str | None,
+    sender_id: str,
+    sender_name: str,
+    user_text: str,
+    assistant_text: str,
+    extra_assistant_text: str | None = None,
+    sticker: str | None = None,
+    usage: Any | None = None,
+    model: str | None = None,
+    schedule: Callable[[str], None] | None = None,
+) -> None:
+    """落库一轮完整对话；失败只记日志，不影响已经生成的回复。"""
+    await persist_user(
+        memory,
+        thread_id=thread_id,
+        group_id=group_id,
+        sender_id=sender_id,
+        sender_name=sender_name,
+        user_text=user_text,
+    )
+    await persist_assistant(
+        memory,
+        thread_id=thread_id,
+        group_id=group_id,
+        assistant_text=assistant_text,
+        extra_assistant_text=extra_assistant_text,
+        sticker=sticker,
+        usage=usage,
+        model=model,
+        schedule=schedule,
+    )

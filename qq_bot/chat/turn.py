@@ -14,8 +14,14 @@ from zoneinfo import ZoneInfo
 from prompts.service import prompt_service
 from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
-from qq_bot.chat.persist import persist_turn
+from qq_bot.chat.persist import persist_turn, persist_user
 from qq_bot.chat.prompt import SystemPromptParts, build_system_prompt
+from qq_bot.chat.video_background import (
+    VIDEO_ACK,
+    VideoJob,
+    is_video_job_active,
+    start_video_job,
+)
 from qq_bot.media.download import download_image
 from qq_bot.memory.assembler import ContextParts, build_context, trim_messages
 from qq_bot.memory.members import members_xml
@@ -84,6 +90,18 @@ async def _send_pending_sticker(reply: Any, pending: tuple[str, bytes] | None) -
         await reply.image(data, name)
     except Exception:
         logger.exception("表情包发送失败 name=%s", name)
+
+
+async def _reply_video_ack(reply: Any) -> None:
+    """先发“稍等”再释放 turn；被动通道能保证它排在最终回答前面。"""
+    try:
+        await reply.passive(VIDEO_ACK)
+    except Exception:
+        logger.warning("视频处理提示被动发送失败，改走主动消息", exc_info=True)
+        try:
+            await reply.text(VIDEO_ACK)
+        except Exception:
+            logger.exception("视频处理提示发送失败，后台任务继续")
 
 
 async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的主流程
@@ -192,6 +210,42 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
         user_content += (
             "\n[用户发送了视频或视频链接；需要理解视频内容时调用 watch_video 工具]"
         )
+
+    if video_refs and getattr(config, "video_background_enabled", True):
+        # 视频分析不占用主 turn：先落用户消息、发 ack，再把分析交给后台任务。
+        if not is_video_job_active(thread_id or 0, incoming.message_id):
+            await _reply_video_ack(incoming.reply)
+            await persist_user(
+                memory,
+                thread_id=thread_id,
+                group_id=gid,
+                sender_id=uid,
+                sender_name=sender_name,
+                user_text=f"{identity_tag}\n{incoming.text}",
+            )
+            question = incoming.text.strip() or "请总结这个视频的内容"
+            start_video_job(
+                VideoJob(
+                    incoming=incoming,
+                    thread_id=thread_id or 0,
+                    group_id=gid,
+                    sender_id=uid,
+                    sender_name=sender_name,
+                    user_text=f"{identity_tag}\n{incoming.text}",
+                    question=question,
+                    source=video_refs[0],
+                    system_prompt=final_prompt,
+                    history=parts.as_history(),
+                    model_name=model_name,
+                    temperature=model_params.temperature,
+                    max_tokens=model_params.max_tokens,
+                    max_context_tokens=config.max_context_tokens,
+                    memory=memory,
+                    schedule=_compression_scheduler(incoming),
+                )
+            )
+        return ""
+
     messages.append(
         ChatMessage(
             role="user",
