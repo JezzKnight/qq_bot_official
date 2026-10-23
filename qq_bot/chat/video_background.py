@@ -15,8 +15,9 @@ from typing import TYPE_CHECKING, Any
 from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
 from qq_bot.chat.persist import persist_assistant
+from qq_bot.chat.session_lock import group_session_key, session_lock
 from qq_bot.memory.assembler import trim_messages
-from qq_bot.platform.reply import split_for_reply
+from qq_bot.platform.reply import send_reply_chunks, split_for_reply
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import get_client_for_model
 from qq_bot.services.memory_writing import get_memory
@@ -56,6 +57,7 @@ class VideoJob:
     max_context_tokens: int
     memory: Any
     schedule: Callable[[str], None] | None
+    typing_delay: bool = True
 
 
 def _job_key(thread_id: int, message_id: str) -> tuple[int, str]:
@@ -176,27 +178,17 @@ async def _answer(job: VideoJob, note: str) -> str:
     return content or "视频看完了 但没整理出能说的内容"
 
 
-async def _send_chunk(job: VideoJob, chunk: str, *, first: bool) -> None:
-    reply = job.incoming.reply
-    try:
-        if first:
-            await reply.mention(job.sender_id, chunk)
-        else:
-            await reply.text(chunk)
-    except Exception:
-        logger.warning("后台视频分段发送失败，改走主动消息", exc_info=True)
-        await reply.text(chunk)
-
-
 async def _send_answer(job: VideoJob, answer: str) -> None:
-    """群聊首条被动回复，后续分段主动；失败时退回主动消息。"""
+    """群聊首条被动回复（带 @），后续分段主动；失败时退回普通消息。"""
     reply = job.incoming.reply
-    if not job.incoming.is_group:
-        await reply.text(answer)
-        await reply.finish()
-        return
-
+    incoming = job.incoming
     chunks = split_for_reply(answer, max_parts=max(1, reply.max_parts))
-    for idx, chunk in enumerate(chunks):
-        await _send_chunk(job, chunk, first=idx == 0)
-    await reply.finish()
+    async with session_lock(group_session_key(incoming.group_key, incoming.user_key)):
+        await send_reply_chunks(
+            reply,
+            chunks,
+            mention_user_key=incoming.user_key if incoming.is_group else None,
+            simulate_typing=job.typing_delay,
+            fallback_to_text=True,
+        )
+        await reply.finish()

@@ -1,8 +1,13 @@
-"""官方 QQ 回复分段：不超过 4 段，尾部合并。"""
+"""官方 QQ 回复分段：不超过 4 段，尾部合并；长句按语义断点切条。"""
 
 from __future__ import annotations
 
-from qq_bot.platform.reply import split_for_reply
+from qq_bot.platform.reply import (
+    TYPE_DELAY_CAP,
+    send_reply_chunks,
+    split_for_reply,
+    typing_delay,
+)
 
 
 def test_short_reply_kept_as_is() -> None:
@@ -18,4 +23,85 @@ def test_long_reply_merges_tail() -> None:
     chunks = split_for_reply(text)
     assert len(chunks) == 4
     assert chunks[0] == "第1段"
-    assert "第7段" in chunks[-1]
+
+
+def test_long_line_splits_on_spaces() -> None:
+    """模型常常写成一大段（我们的风格用空格断句），超长要按空格切开。"""
+    text = (
+        "等下 是哪条 你说 我核一遍 要是真是我给错了 我现在就认 对不起 "
+        "你气的是给错数还不吭声吧 换我也烦"
+    )
+    chunks = split_for_reply(text, max_chars=20)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 20 for chunk in chunks)
+    assert " ".join(chunks) == text
+
+
+def test_sentence_end_preferred_over_space() -> None:
+    chunks = split_for_reply("第一句结束。第二句也结束。第三句", max_chars=8)
+    assert chunks[0].endswith("。")
+
+
+def test_never_splits_inside_number() -> None:
+    """500N / 1612N 这类是技术回答的命根子，不能被劈开。"""
+    text = "实测是 1612N 断裂 厂家给的单台总成静载只有 2000N 这个差值你得看看"
+    chunks = split_for_reply(text, max_chars=10)
+    assert "1612N" in " ".join(chunks)
+    assert "2000N" in " ".join(chunks)
+
+
+def test_does_not_break_after_dangling_word() -> None:
+    """断在"是/的/了"这类单字后面会把一句话读成半句。"""
+    text = "我查了一圈 GB 7258-2017 的 7.2.9 是 500N 那是操作力 不是结构强度"
+    chunks = split_for_reply(text, max_chars=30)
+    assert not chunks[0].endswith(("是", "的", "了"))
+    assert chunks[1].startswith("是 ")
+
+
+def test_zero_max_chars_disables_splitting() -> None:
+    text = "很长的一段话" * 10
+    assert split_for_reply(text, max_chars=0) == [text]
+
+
+def test_max_parts_holds_after_splitting() -> None:
+    chunks = split_for_reply("很短的话 和别的问题 " * 20, max_parts=3, max_chars=10)
+    assert len(chunks) == 3
+
+
+class FakeReply:
+    max_parts = 4
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    async def text(self, content: str) -> None:
+        self.sent.append(("text", content))
+
+    async def mention(self, user_key: str, content: str) -> None:
+        self.sent.append(("mention", f"{user_key}|{content}"))
+
+
+async def test_send_reply_chunks_first_mentioned_rest_plain() -> None:
+    reply = FakeReply()
+    await send_reply_chunks(
+        reply, ["甲", "乙"], mention_user_key="u1", simulate_typing=False
+    )
+    assert reply.sent == [("mention", "u1|甲"), ("text", "乙")]
+
+
+async def test_send_reply_chunks_without_mention_starts_with_text() -> None:
+    reply = FakeReply()
+    await send_reply_chunks(reply, ["甲", "乙"], simulate_typing=False)
+    assert reply.sent == [("text", "甲"), ("text", "乙")]
+
+
+async def test_send_reply_chunks_skips_blank() -> None:
+    reply = FakeReply()
+    await send_reply_chunks(reply, ["", "  ", "甲"], simulate_typing=False)
+    assert reply.sent == [("text", "甲")]
+
+
+def test_typing_delay_scales_with_length_and_caps() -> None:
+    assert typing_delay("") == 0.0
+    assert typing_delay("短") < typing_delay("这句话稍微长一点")
+    assert typing_delay("很" * 100) == TYPE_DELAY_CAP

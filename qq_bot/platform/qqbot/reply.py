@@ -18,12 +18,24 @@ SEND_TIMEOUT = 25.0
 
 
 def normalize_typing(text: str) -> str:
-    """大肥鱼的打字习惯：聊天正文里的中文逗号改成空格。
+    """大肥鱼的打字习惯：中文逗号改空格 + 去掉段尾句号。
 
     prompt 已经要求模型这样做；这里再兜一层，避免技术解释里偶尔漏掉。
     只替换中文逗号，代码里的英文逗号不动。
+    句号只去段尾那一个（QQ 里没人打句号），小数、省略号、URL 都不受影响。
     """
-    return text.replace("，", " ")
+    return _strip_trailing_period(text.replace("，", " ").rstrip())
+
+
+def _strip_trailing_period(text: str) -> str:
+    """去掉段尾的句号：中文句号/全角点一定去，英文点避开 "..." 这种省略号。"""
+    if not text:
+        return text
+    if text.endswith(("。", "\uff0e")):  # \uff0e 是全角句点
+        return text[:-1].rstrip()
+    if text.endswith(".") and not text.endswith(".."):
+        return text[:-1].rstrip()
+    return text
 # QQ 开放平台：40034006 = 消息内容违规
 CONTENT_VIOLATION_CODE = 40034006
 CONTENT_VIOLATION_NOTICE = "发送图片失败，消息内容违规 QAQ"

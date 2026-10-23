@@ -61,3 +61,15 @@ def test_normalize_typing_uses_space_for_chinese_comma() -> None:
         "一点还不睡 明天上班不困成狗啊"
     )
     assert normalize_typing("代码里的 foo(a, b) 不动") == "代码里的 foo(a, b) 不动"
+
+
+def test_normalize_typing_strips_trailing_period() -> None:
+    """QQ 里没人打句号：段尾的中文句号去掉，问号感叹号保留。"""
+    assert normalize_typing("对不起。") == "对不起"
+    assert normalize_typing("我认。") == "我认"
+    assert normalize_typing("真的吗？") == "真的吗？"
+    assert normalize_typing("是这样！") == "是这样！"
+
+
+def test_normalize_typing_keeps_ellipsis() -> None:
+    assert normalize_typing("等等...") == "等等..."

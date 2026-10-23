@@ -16,6 +16,7 @@ from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
 from qq_bot.chat.persist import persist_turn, persist_user
 from qq_bot.chat.prompt import SystemPromptParts, build_system_prompt
+from qq_bot.chat.session_lock import group_session_key, session_lock
 from qq_bot.chat.video_background import (
     VIDEO_ACK,
     VideoJob,
@@ -27,7 +28,7 @@ from qq_bot.memory.assembler import ContextParts, build_context, trim_messages
 from qq_bot.memory.members import members_xml
 from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.memory.naming import escape_for_prompt
-from qq_bot.platform.reply import split_for_reply
+from qq_bot.platform.reply import MAX_CHUNK_CHARS, send_reply_chunks, split_for_reply
 from qq_bot.search.retry import RETRY_ACK, looks_insufficient
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
@@ -104,7 +105,13 @@ async def _reply_video_ack(reply: Any) -> None:
             logger.exception("视频处理提示发送失败，后台任务继续")
 
 
-async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的主流程
+async def run_turn(incoming: Incoming, *, config: Any) -> str:
+    """执行一轮对话；同一会话内串行，避免两轮回复的分段消息在群里交叉。"""
+    async with session_lock(group_session_key(incoming.group_key, incoming.user_key)):
+        return await _run_turn(incoming, config=config)
+
+
+async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的主流程
     incoming: Incoming,
     *,
     config: Any,
@@ -242,6 +249,7 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
                     max_context_tokens=config.max_context_tokens,
                     memory=memory,
                     schedule=_compression_scheduler(incoming),
+                    typing_delay=getattr(config, "reply_typing_delay", True),
                 )
             )
         return ""
@@ -411,22 +419,21 @@ async def run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的
     )
     logger.info("TURN persist done")
 
-    if is_group:
-        max_parts = max(1, incoming.reply.max_parts - reply_parts_used)
-        if pending_sticker is not None and max_parts > 1:
-            # 给表情包留一次发送额度
-            max_parts -= 1
-        chunks = split_for_reply(final_content, max_parts=max_parts)
-        for idx, chunk in enumerate(chunks):
-            if idx == 0:
-                await incoming.reply.mention(incoming.user_key, chunk)
-            else:
-                await incoming.reply.text(chunk)
-        await _send_pending_sticker(incoming.reply, pending_sticker)
-        await incoming.reply.finish()
-    else:
-        if final_content.strip():
-            await incoming.reply.text(final_content)
-        await _send_pending_sticker(incoming.reply, pending_sticker)
-        await incoming.reply.finish()
+    max_parts = max(1, incoming.reply.max_parts - reply_parts_used)
+    if pending_sticker is not None and max_parts > 1:
+        # 给表情包留一次发送额度
+        max_parts -= 1
+    chunks = split_for_reply(
+        final_content,
+        max_parts=max_parts,
+        max_chars=getattr(config, "reply_split_max_chars", MAX_CHUNK_CHARS),
+    )
+    await send_reply_chunks(
+        incoming.reply,
+        chunks,
+        mention_user_key=incoming.user_key if is_group else None,
+        simulate_typing=getattr(config, "reply_typing_delay", True),
+    )
+    await _send_pending_sticker(incoming.reply, pending_sticker)
+    await incoming.reply.finish()
     return final_content
