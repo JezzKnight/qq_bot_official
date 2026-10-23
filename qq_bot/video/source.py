@@ -10,10 +10,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .types import VideoSource
 
@@ -108,6 +109,23 @@ def classify(url: str) -> VideoSource:
     if is_direct_video_url(url):
         return VideoSource(url=url, platform="direct")
     return VideoSource(url=url, platform="other")
+
+
+def video_cache_key(source: VideoSource) -> str:
+    """返回稳定的视频缓存键。
+
+    B 站按 BV/av + 分P；抖音按数字视频 id；直链/QQ 附件按完整 URL 的
+    hash，避免把带鉴权参数的临时地址误合并。
+    """
+    if source.platform == "bilibili" and source.video_id:
+        page = parse_qs(urlsplit(source.url).query).get("p", ["1"])[0] or "1"
+        return f"bilibili:{source.video_id}:p{page}"
+    if source.platform == "douyin":
+        match = re.search(r"/video/(\d+)", source.url)
+        if match:
+            return f"douyin:{match.group(1)}"
+    digest = hashlib.sha256(source.url.encode("utf-8")).hexdigest()[:32]
+    return f"{source.platform}:{digest}"
 
 
 def video_urls_in_text(text: str) -> list[str]:

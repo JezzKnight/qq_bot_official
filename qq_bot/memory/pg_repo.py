@@ -666,6 +666,76 @@ class PgRepository:
         )
         return int(status.split()[-1])
 
+    # ── 视频笔记缓存 ─────────────────────────────────────
+
+    async def get_video_note(self, video_key: str) -> dict[str, Any] | None:
+        """按规范化视频键取笔记；命中时累加 hit_count。"""
+        row = await self.pool.fetchrow(
+            """
+            SELECT id, video_key, platform, video_id, source_url, title,
+                   duration, note, frame_count, subtitle_chars, metadata,
+                   hit_count, created_at, updated_at, last_used_at
+              FROM video_notes
+             WHERE video_key = $1
+            """,
+            video_key,
+        )
+        if not row:
+            return None
+        await self.pool.execute(
+            "UPDATE video_notes SET hit_count = hit_count + 1, "
+            "       last_used_at = now() WHERE video_key = $1",
+            video_key,
+        )
+        result = dict(row)
+        result["hit_count"] = int(result["hit_count"]) + 1
+        return result
+
+    async def save_video_note(  # noqa: PLR0913
+        self,
+        *,
+        video_key: str,
+        platform: str,
+        video_id: str = "",
+        source_url: str = "",
+        title: str = "",
+        duration: float = 0.0,
+        note: str,
+        frame_count: int = 0,
+        subtitle_chars: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """新增或覆盖视频笔记（同一视频只保留最新一份）。"""
+        await self.pool.execute(
+            """
+            INSERT INTO video_notes
+                (video_key, platform, video_id, source_url, title, duration,
+                 note, frame_count, subtitle_chars, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (video_key) DO UPDATE SET
+                platform = EXCLUDED.platform,
+                video_id = EXCLUDED.video_id,
+                source_url = EXCLUDED.source_url,
+                title = EXCLUDED.title,
+                duration = EXCLUDED.duration,
+                note = EXCLUDED.note,
+                frame_count = EXCLUDED.frame_count,
+                subtitle_chars = EXCLUDED.subtitle_chars,
+                metadata = EXCLUDED.metadata,
+                updated_at = now()
+            """,
+            video_key,
+            platform,
+            video_id,
+            source_url,
+            title,
+            duration,
+            note,
+            frame_count,
+            subtitle_chars,
+            metadata or {},
+        )
+
     # ── 群术语库 ─────────────────────────────────────────
 
     async def upsert_glossary_term(

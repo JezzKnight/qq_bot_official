@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "memories",
     "glossary_terms",
     "stickers",
+    "video_notes",
     "schema_version",
 }
 
@@ -24,11 +25,11 @@ async def test_migrations_create_all_tables(db) -> None:
 
 
 async def test_schema_version_is_one(db) -> None:
-    assert await db.fetchval("SELECT max(version) FROM schema_version") == 9
+    assert await db.fetchval("SELECT max(version) FROM schema_version") == 10
 
 
 async def test_migrations_idempotent(db) -> None:
-    assert await apply_migrations(db) == 9
+    assert await apply_migrations(db) == 10
 
 
 async def test_all_tables_and_columns_have_comments(db) -> None:

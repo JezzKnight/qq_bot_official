@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -36,10 +37,19 @@ async def _recreate_database() -> None:
         await admin.close()
 
 
+async def _init_conn(conn: asyncpg.Connection) -> None:
+    """与生产 PgRepository 一致，让 jsonb 列直传/直取 dict。"""
+    await conn.set_type_codec(
+        "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+    )
+
+
 @pytest_asyncio.fixture(scope="session")
 async def pg_pool():
     await _recreate_database()
-    pool = await asyncpg.create_pool(_dsn(TEST_DB), min_size=1, max_size=4)
+    pool = await asyncpg.create_pool(
+        _dsn(TEST_DB), min_size=1, max_size=4, init=_init_conn
+    )
     from qq_bot.memory.migrate import apply_migrations
 
     await apply_migrations(pool)
@@ -54,7 +64,7 @@ async def db(pg_pool):
     async with pg_pool.acquire() as conn:
         await conn.execute(
             "TRUNCATE messages, threads, user_names, group_members, users, "
-            "group_summaries, memories, glossary_terms, stickers "
+            "group_summaries, memories, glossary_terms, stickers, video_notes "
             "RESTART IDENTITY CASCADE"
         )
 
@@ -68,6 +78,6 @@ async def repo(pg_pool):
     async with pg_pool.acquire() as conn:
         await conn.execute(
             "TRUNCATE messages, threads, user_names, group_members, users, "
-            "group_summaries, memories, glossary_terms, stickers "
+            "group_summaries, memories, glossary_terms, stickers, video_notes "
             "RESTART IDENTITY CASCADE"
         )

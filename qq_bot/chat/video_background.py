@@ -19,6 +19,7 @@ from qq_bot.memory.assembler import trim_messages
 from qq_bot.platform.reply import split_for_reply
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import get_client_for_model
+from qq_bot.services.memory_writing import get_memory
 from qq_bot.video.pipeline import VideoAgent
 
 if TYPE_CHECKING:
@@ -97,7 +98,10 @@ async def _run_video_job(job: VideoJob) -> None:
     answer = ""
     try:
         async with asyncio.timeout(JOB_TIMEOUT_SECONDS):
-            agent = VideoAgent(usage_recorder=token_usage.record)
+            agent = VideoAgent(
+                usage_recorder=token_usage.record,
+                note_store=await get_memory(),
+            )
             insight = await agent.analyze(job.source, question=job.question)
             note = (insight.text or "").strip()[:MAX_VIDEO_NOTE_CHARS]
             answer = await _answer(job, note)

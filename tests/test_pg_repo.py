@@ -8,6 +8,31 @@ from zoneinfo import ZoneInfo
 from qq_bot.memory.memory_config import BudgetConfig, MemoryConfig, ShortTermConfig
 
 
+async def test_video_note_roundtrip(repo) -> None:
+    await repo.save_video_note(
+        video_key="bilibili:BV1test:p1",
+        platform="bilibili",
+        video_id="BV1test",
+        source_url="https://www.bilibili.com/video/BV1test",
+        title="测试视频",
+        duration=42.0,
+        note="这是视频笔记",
+        frame_count=8,
+        subtitle_chars=120,
+        metadata={"warnings": []},
+    )
+    row = await repo.get_video_note("bilibili:BV1test:p1")
+    assert row is not None
+    assert row["title"] == "测试视频"
+    assert row["note"] == "这是视频笔记"
+    assert row["metadata"] == {"warnings": []}
+    assert row["hit_count"] == 1
+
+    second = await repo.get_video_note("bilibili:BV1test:p1")
+    assert second is not None
+    assert second["hit_count"] == 2
+
+
 async def test_ensure_thread_is_idempotent_for_private(repo) -> None:
     first = await repo.ensure_thread("private", None, "U42")
     second = await repo.ensure_thread("private", None, "U42")

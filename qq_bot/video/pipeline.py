@@ -8,7 +8,7 @@ import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -25,8 +25,11 @@ from .bilibili import BilibiliError, fetch_meta, fetch_subtitles, resolve_b23
 from .config import VideoConfig
 from .fetcher import VideoFetchError, fetch
 from .frames import VideoFrameError, make_keyframes
-from .source import classify, is_safe_public_url, video_urls_in_text
+from .source import classify, is_safe_public_url, video_cache_key, video_urls_in_text
 from .types import VideoInsight, VideoSource
+
+if TYPE_CHECKING:
+    from .notes import VideoNoteStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +43,12 @@ class VideoAgent:
         config: VideoConfig | None = None,
         model: str = "",
         usage_recorder: Any = None,
+        note_store: VideoNoteStore | None = None,
     ) -> None:
         self.config = config or VideoConfig.from_env()
         self.model = model or self.config.vision_model or default_model_name()
         self.usage_recorder = usage_recorder
+        self.note_store = note_store
 
     def _source_from_input(self, raw: str | MediaRef) -> VideoSource:
         if isinstance(raw, MediaRef):
@@ -129,6 +134,72 @@ class VideoAgent:
                 float(meta.duration),
             )
 
+    async def _cached_insight(
+        self, video_key: str, started: float
+    ) -> VideoInsight | None:
+        """命中视频笔记时直接返回，不下载、不抽帧、不调视觉模型。"""
+        if self.note_store is None:
+            return None
+        try:
+            row = await self.note_store.get_video_note(video_key)
+        except Exception:
+            logger.warning("读取视频笔记失败: key=%s", video_key, exc_info=True)
+            return None
+        if not row:
+            return None
+        note = str(row.get("note") or "").strip()
+        if not note:
+            return None
+        logger.info(
+            "视频笔记命中: key=%s title=%s hits=%s",
+            video_key,
+            str(row.get("title") or "")[:40],
+            row.get("hit_count"),
+        )
+        return VideoInsight(
+            text=note,
+            title=str(row.get("title") or ""),
+            duration=float(row.get("duration") or 0),
+            frame_count=int(row.get("frame_count") or 0),
+            subtitle_chars=int(row.get("subtitle_chars") or 0),
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+
+    @staticmethod
+    def _cacheable(insight: VideoInsight) -> bool:
+        text = (insight.text or "").strip()
+        if not text:
+            return False
+        return not text.startswith(
+            ("视频获取失败:", "视频抽帧失败:", "视觉模型分析失败:")
+        )
+
+    async def _save_note(self, source: VideoSource, insight: VideoInsight) -> None:
+        """只缓存成功分析；失败结果不写，避免把一次故障永久化。"""
+        if self.note_store is None or not self._cacheable(insight):
+            return
+        try:
+            await self.note_store.save_video_note(
+                video_key=video_cache_key(source),
+                platform=source.platform,
+                video_id=source.video_id,
+                source_url=source.url,
+                title=insight.title,
+                duration=insight.duration,
+                note=insight.text,
+                frame_count=insight.frame_count,
+                subtitle_chars=insight.subtitle_chars,
+                metadata={"warnings": insight.warnings},
+            )
+        except Exception:
+            logger.warning("保存视频笔记失败: source=%s", source.url, exc_info=True)
+            return
+        logger.info(
+            "视频笔记已保存: key=%s chars=%d",
+            video_cache_key(source),
+            len(insight.text),
+        )
+
     async def analyze(  # noqa: C901, PLR0915 —— 编排流程集中在这里
         self,
         raw: str | MediaRef,
@@ -143,6 +214,9 @@ class VideoAgent:
             source.video_id or "-",
             len(question),
         )
+        cached = await self._cached_insight(video_cache_key(source), started)
+        if cached is not None:
+            return cached
         warnings: list[str] = []
         with tempfile.TemporaryDirectory(prefix="qqbot-video-") as tmp:
             workdir = Path(tmp)
@@ -257,7 +331,7 @@ class VideoAgent:
                 len(transcript),
                 time.monotonic() - started,
             )
-            return VideoInsight(
+            insight = VideoInsight(
                 text="\n\n".join(body),
                 title=title,
                 duration=duration,
@@ -266,3 +340,5 @@ class VideoAgent:
                 warnings=list(dict.fromkeys(warnings)),
                 elapsed_ms=int((time.monotonic() - started) * 1000),
             )
+            await self._save_note(source, insight)
+            return insight

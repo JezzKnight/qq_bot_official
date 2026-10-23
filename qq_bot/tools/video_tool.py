@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from qq_bot.services import token_usage
+from qq_bot.services.memory_writing import get_memory
 from qq_bot.tools.context import current_videos
 from qq_bot.tools.registry import register_tool
 from qq_bot.video.pipeline import VideoAgent
@@ -55,7 +56,10 @@ async def watch_video(question: str, video: str = "") -> str:
     if raw is None:
         return "[视频解析失败] 当前消息里没有视频，也没有提供视频链接"
     try:
-        agent = VideoAgent(usage_recorder=token_usage.record)
+        agent = VideoAgent(
+            usage_recorder=token_usage.record,
+            note_store=await get_memory(),
+        )
         insight = await agent.analyze(raw, question=question)
     except Exception as exc:
         logger.exception("watch_video 失败")
