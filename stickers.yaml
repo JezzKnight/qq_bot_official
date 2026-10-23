@@ -19,9 +19,9 @@ stickers:
     description: 听到离谱消息、看到逆天发言、被吓到或想表达“啊？”时使用。
 
   - file: lai.gif
-    name: 过来
-    tags: [过来, 伸手, 叫你来, 欠揍]
-    description: 招手叫对方过来、催人、挑衅式邀请时使用；适合配“过来啊”“你过来”。
+    name: token来
+    tags: [token来, token, 伸手, 要token, 白饭, 催投喂, 拿来]
+    description: 理直气壮地伸手索要 token（她眼里的口粮／“白饭”）时使用：用户提到 token、额度、用量、充值，或者让她多干活、加班，又或者她饿了讨投喂、催人给点 token 时。配台词“token来！token来！”，带点撒泼式的理所当然和不满；不要用来真的骂人，也不要拿去讨要现实中的钱。
 
   - file: online.jpg
     name: 最强

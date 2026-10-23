@@ -1,11 +1,12 @@
-# chat 系统提示词链路 v4（QQ 专用，大肥鱼人设）
+# chat 系统提示词链路 v5（QQ 专用，大肥鱼人设）
 # modules 的顺序就是拼接顺序；条目格式为 name.version。
 # - name 对应 chat/{name}.md
 # - version 是版本标记（改内容时手动递增）
-version: 4
+version: 5
 modules:
   - persona.v1
   - social.v1
+  - uncertainty.v7
   - constraints.v1
   - platform.v1
   - multimodal.v1

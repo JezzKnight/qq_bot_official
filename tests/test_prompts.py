@@ -11,7 +11,14 @@ from prompts.renderer import PromptRenderer
 from prompts.service import PromptChainError, PromptService, prompt_service
 
 CHAT_DIR = Path("prompts/chat")
-BASE_ORDER = ["persona", "social", "constraints", "platform", "multimodal"]
+BASE_ORDER = [
+    "persona",
+    "social",
+    "uncertainty",
+    "constraints",
+    "platform",
+    "multimodal",
+]
 
 
 def _marker(name: str) -> str:
@@ -24,7 +31,7 @@ def _positions(text: str, names: list[str]) -> list[int]:
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 4
+    assert prompt_service.chain_version == 5
     assert all(ref.version.startswith("v") for ref in prompt_service.modules)
 
 
