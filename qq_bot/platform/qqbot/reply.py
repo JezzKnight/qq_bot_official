@@ -9,6 +9,12 @@ from typing import TYPE_CHECKING, Any
 from nonebot.adapters.qq import MessageSegment
 from nonebot.adapters.qq.exception import ActionFailed
 
+from .image_security import (
+    ImageChecker,
+    ImageCheckResult,
+    get_image_security_checker,
+)
+
 if TYPE_CHECKING:
     from nonebot.adapters.qq.models.common import MessageKeyboard
 
@@ -24,9 +30,12 @@ def normalize_typing(text: str) -> str:
     只替换中文逗号，代码里的英文逗号不动。
     """
     return text.replace("，", " ")
+
+
 # QQ 开放平台：40034006 = 消息内容违规
 CONTENT_VIOLATION_CODE = 40034006
 CONTENT_VIOLATION_NOTICE = "发送图片失败，消息内容违规 QAQ"
+IMAGE_BLOCKED_NOTICE = "这张图没通过安全审核，先不发了 QAQ"
 
 
 class QQReply:
@@ -38,10 +47,17 @@ class QQReply:
 
     max_parts = 4
 
-    def __init__(self, bot: Any, event: Any) -> None:
+    def __init__(
+        self,
+        bot: Any,
+        event: Any,
+        *,
+        image_checker: ImageChecker | None = None,
+    ) -> None:
         self._bot = bot
         self._event = event
         self._violation_notified = False
+        self._image_checker = image_checker
 
     async def _send(self, seg: Any, *, passive: bool) -> None:
         logger.info("QQ send start passive=%s", passive)
@@ -96,6 +112,20 @@ class QQReply:
         """发送图片；内容违规时只提示一次并返回 False，调用方可提前结束批量发图。"""
         if self._violation_notified:
             return False
+        checker = self._image_checker or get_image_security_checker()
+        try:
+            result = await checker.check(data)
+        except Exception:
+            logger.exception("图片安全检测异常，按不合规拦截")
+            result = ImageCheckResult(allowed=False, message="图片安全检测异常")
+        if not result.allowed:
+            logger.warning(
+                "QQ 图片未通过安全审核 code=%s message=%s",
+                result.code,
+                result.message,
+            )
+            await self._notify_image_blocked()
+            return False
         seg = MessageSegment.file_image(data, name or "image.png")
         try:
             await self._send(seg, passive=False)
@@ -110,6 +140,16 @@ class QQReply:
                 await self._notify_content_violation()
                 return False
             raise
+
+    async def _notify_image_blocked(self) -> None:
+        """图片审核未通过时只提示一次，避免连续刷屏。"""
+        if self._violation_notified:
+            return
+        self._violation_notified = True
+        try:
+            await self.text(IMAGE_BLOCKED_NOTICE)
+        except Exception:
+            logger.exception("发送图片安全拦截提示失败")
 
     async def _notify_content_violation(self) -> None:
         """违规提示只发一次；提示本身失败也不能再抛异常拖垮 handler。"""

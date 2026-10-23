@@ -9,6 +9,7 @@ QQ 开放平台（官方 API）专用的 AI 群聊/私聊机器人。基于 None
 - 长期记忆（PostgreSQL）：个人线程、群摘要、语义记忆、术语库、称呼
 - 工具：联网搜索（fast/standard/deep；证据不足时自动换 query 补查一次）、表情包、记忆读写、历史查询
 - 视频理解：用户发送视频/转发视频链接，yt-dlp 获取、ffmpeg scdet 抽关键帧、B 站 CC 字幕辅助，视觉模型总结；默认后台处理，先回“稍等”，不阻塞当前对话
+- 图片安全：所有出站图片先调用 QQ 小程序 `security.imgSecCheck`，不合规直接拦截并提示
 - 指令：`/help`、`/reset`、`/reset group`（管理员）、`/reset all`（管理员）、`/usage`、`/model`、`/whoami`、`/reboot`（管理员）
 - 群主开启"接收全量消息"后，可记录普通群消息用于群上下文
 
@@ -40,6 +41,8 @@ QQ | Bot <AppID> connected
 | `DEEPSEEK_API_KEY` / `GLM_API_KEY` / `TAVILY_KEY` | 模型与搜索密钥 |
 | `BILIBILI_COOKIE` | B 站登录 Cookie（AI 字幕需要；至少 `SESSDATA=...`）|
 | `VIDEO_*` | 视频上限/帧数/模型等，见 `.env.example` |
+| `QQ_MINI_APPID` / `QQ_MINI_SECRET` | 已上线的 QQ 小程序凭证（图片安全审核用，不能用机器人 AppID）|
+| `IMAGE_SECURITY_ENABLED` | 是否启用图片安全审核；默认 true，未配置凭证时图片会被拦截 |
 
 ## 结构
 
@@ -64,3 +67,4 @@ prompts/chat/           # chain.yaml + 各模块
 - 被动回复每条消息有次数上限（当前按 4 段控制）
 - 定时提醒/主动消息未实现（相关工具与调度代码已移除）
 - 视频工具：单次最多 10 分钟 / 160MB、默认 8 帧；无 ASR，B 站 AI 字幕需要 Cookie；抖音未重点验证
+- 图片安全审核使用的是 QQ 小程序接口，不是机器人 AppID；需要单独的小程序 AppID/Secret

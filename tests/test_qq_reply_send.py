@@ -8,8 +8,10 @@ from typing import Any
 from nonebot.adapters.qq.exception import ActionFailed
 from nonebot.drivers import Response
 
+from qq_bot.platform.qqbot.image_security import ImageCheckResult
 from qq_bot.platform.qqbot.reply import (
     CONTENT_VIOLATION_NOTICE,
+    IMAGE_BLOCKED_NOTICE,
     QQReply,
     normalize_typing,
 )
@@ -42,13 +44,23 @@ class FakeBot:
         self.sent.append(message)
 
 
+class AllowChecker:
+    async def check(self, _data: bytes) -> ImageCheckResult:
+        return ImageCheckResult(allowed=True)
+
+
+class BlockChecker:
+    async def check(self, _data: bytes) -> ImageCheckResult:
+        return ImageCheckResult(allowed=False, code=87014, message="risky")
+
+
 class FakeEvent:
     group_openid = "group-openid"
 
 
 async def test_image_content_violation_sends_notice_once() -> None:
     bot = FakeBot()
-    reply = QQReply(bot, FakeEvent())
+    reply = QQReply(bot, FakeEvent(), image_checker=AllowChecker())
     assert await reply.image(b"fake-image", "a.png") is False
     assert await reply.image(b"fake-image", "b.png") is False
     assert bot.image_attempts == 1
@@ -61,3 +73,13 @@ def test_normalize_typing_uses_space_for_chinese_comma() -> None:
         "一点还不睡 明天上班不困成狗啊"
     )
     assert normalize_typing("代码里的 foo(a, b) 不动") == "代码里的 foo(a, b) 不动"
+
+
+async def test_image_is_blocked_before_network_send() -> None:
+    bot = FakeBot()
+    reply = QQReply(bot, FakeEvent(), image_checker=BlockChecker())
+    assert await reply.image(b"fake-image", "a.png") is False
+    assert await reply.image(b"fake-image", "b.png") is False
+    assert bot.image_attempts == 0
+    texts = [seg.data.get("text") for seg in bot.sent if seg.type == "text"]
+    assert texts == [normalize_typing(IMAGE_BLOCKED_NOTICE)]
