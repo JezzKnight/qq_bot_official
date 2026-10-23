@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from qq_bot.platform.qqbot.image_security import ImageCheckResult
 from qq_bot.platform.qqbot.incoming import (
     QQ_CAPS,
     from_event,
@@ -152,12 +151,8 @@ def test_image_segment_becomes_media_ref() -> None:
 
 
 async def test_first_segment_is_passive_rest_are_active() -> None:
-    class AllowChecker:
-        async def check(self, _data: bytes) -> ImageCheckResult:
-            return ImageCheckResult(allowed=True)
-
     bot = FakeBot()
-    reply = QQReply(bot, FakeEvent(group_openid="g"), image_checker=AllowChecker())
+    reply = QQReply(bot, FakeEvent(group_openid="g"))
     await reply.mention("openid-user-123456", "第一段")
     await reply.text("第二段")
     await reply.image(b"bytes", "s.png")
