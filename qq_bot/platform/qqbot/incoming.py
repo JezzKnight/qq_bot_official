@@ -72,11 +72,18 @@ def _quoted_prefix(event: Any) -> str:
         for item in attachments
         if str(getattr(item, "content_type", "")).startswith("image/")
     )
+    video_count = sum(
+        1
+        for item in attachments
+        if str(getattr(item, "content_type", "")).startswith("video/")
+    )
     parts: list[str] = []
     if content:
         parts.append(f'"{content}"')
     if img_count:
         parts.append(f"[{img_count} 张图片]")
+    if video_count:
+        parts.append(f"[{video_count} 个视频]")
     if not parts:
         return ""
     return f"[用户引用了 {name} 的消息：{'，'.join(parts)}]\n"
@@ -109,6 +116,11 @@ def _collect_videos(segments: list[Any], quoted: Any) -> list[MediaRef]:
         url = str(getattr(item, "url", "") or "")
         if content_type.startswith("video/") and url:
             _append_video(media, url)
+
+    # 引用的是文字消息时，视频链接只在 reply.content 里，不在 attachments。
+    quoted_content = str(getattr(quoted, "content", "") or "")
+    for text_url in video_urls_in_text(quoted_content):
+        _append_video(media, text_url)
     return media
 
 

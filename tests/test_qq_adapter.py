@@ -245,6 +245,36 @@ def test_quoted_image_without_url_is_ignored() -> None:
     assert "[1 张图片]" in incoming.text
 
 
+def test_quoted_video_is_added_to_media() -> None:
+    event = FakeEvent(
+        group_openid="group-openid-1",
+        message=[FakeSeg("text", {"text": "看这个"})],
+        reply=FakeQuoted(
+            "原视频",
+            [FakeAttachment("video/mp4", "https://example.com/quoted.mp4")],
+        ),
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.images[-1].kind == "video"
+    assert incoming.images[-1].url == "https://example.com/quoted.mp4"
+    assert "[1 个视频]" in incoming.text
+    assert "原视频" in incoming.text
+
+
+def test_quoted_text_video_link_is_added_to_media() -> None:
+    event = FakeEvent(
+        group_openid="group-openid-1",
+        message=[FakeSeg("text", {"text": "看这个"})],
+        reply=FakeQuoted(
+            "https://www.bilibili.com/video/BV1xx411c7mD",
+            [],
+        ),
+    )
+    incoming = from_event(event, reply=FakeReply())
+    assert incoming.images[-1].kind == "video"
+    assert incoming.images[-1].url == "https://www.bilibili.com/video/BV1xx411c7mD"
+
+
 def test_video_segment_and_text_link_become_video_refs() -> None:
     event = FakeEvent(
         group_openid="g",
