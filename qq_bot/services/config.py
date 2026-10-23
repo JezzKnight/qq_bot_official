@@ -29,6 +29,16 @@ class AiChatConfig(BaseModel):
     reply_split_max_chars: int = 30  # 单条超过该字数就按标点/空格切条
     reply_typing_delay: bool = True  # 分段之间按字数模拟打字停顿
 
+    # ── 群聊自动接话（L1：蹭 @ 触发的被动回复窗口，不耗主动消息额度）──
+    group_autotrigger: bool = True  # 总开关；关掉后 full_matcher 只落库不接话
+    group_autotrigger_daily_cap: int = 6  # 每群每天最多自动接几句
+    group_autotrigger_cooldown_sec: int = 90  # 同群两次自动接话的最小间隔
+    group_autotrigger_probability: float = 0.6  # 过阈值后再摇一次概率
+    group_autotrigger_min_score: int = 4  # 打分阈值（见 qq_bot/chat/activation.py）
+    group_autotrigger_window_seconds: int = 300  # 平台被动窗口：5 分钟
+    group_autotrigger_names: str = "大肥鱼,肥鱼,鱼鱼"  # 逗号分隔：文本点到名字 +3
+    group_autotrigger_hint: str = "（这没人在叫你，你只是顺嘴插一句）"
+
     # ── WebSearch配置 ──
     Tavily_key: list[str] = []
 

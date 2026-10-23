@@ -21,8 +21,11 @@ from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
 from qq_bot.ai.model_registry import get_registry
+from qq_bot.chat import passive_window
+from qq_bot.chat.autotrigger import maybe_autotrigger, record_bot_message
 from qq_bot.chat.turn import run_turn
 from qq_bot.memory.memory_config import get_memory_config
+from qq_bot.platform.ports import Incoming
 from qq_bot.platform.qqbot.incoming import (
     from_event as qq_from_event,
 )
@@ -117,21 +120,45 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
         return
 
     config = get_plugin_config(AiChatConfig)
+    # 登记被动窗口：@ 这一轮按最保守口径记账（假设 4 段已用满），窗口里只留
+    # 1 次给自动接话。真实剩余额度以平台为准：宁可少说，也不能超发被拒。
+    if incoming.group_key:
+        passive_window.register(
+            incoming.group_key,
+            incoming.reply,
+            window_seconds=float(config.group_autotrigger_window_seconds),
+        )
     try:
-        await asyncio.wait_for(run_turn(incoming, config=config), timeout=120)
+        final_content = await asyncio.wait_for(
+            run_turn(incoming, config=config), timeout=120
+        )
     except asyncio.TimeoutError:
         logger.exception("QQ turn timeout after 120s")
     except Exception:
         logger.exception("QQ 官方路径处理失败")
         await bot.send(event, MessageSegment.text("我这边卡了一下 稍后再试"))
+    else:
+        # 记下 bot 上一句：自动接话靠「实词重叠」判断是不是同一个话题
+        if incoming.group_key:
+            record_bot_message(incoming.group_key, final_content or "")
 
 
-async def _record_full_message(bot: Bot, event: QQMessageEvent) -> None:
-    """把群内普通消息写入该成员的线程，供群窗口/摘要使用；不触发 AI。"""
+async def _record_full_message(
+    bot: Bot,
+    event: QQMessageEvent,
+    *,
+    incoming: Incoming | None = None,
+) -> None:
+    """把群内普通消息写入该成员的线程，供群窗口/摘要使用；不触发 AI。
+
+    ``incoming`` 允许调用方传入已构造好的对象：同一条消息既要落库又要判自动
+    接话，构造两次纯属浪费。
+    """
     author = getattr(event, "author", None)
     if getattr(author, "bot", False):
         return
-    incoming = qq_from_event(event, reply=QQReply(bot, event))
+    if incoming is None:
+        incoming = qq_from_event(event, reply=QQReply(bot, event))
     if not incoming.text and not incoming.images:
         return
     repo = await get_memory()
@@ -167,7 +194,11 @@ if _FULL_GROUP:
 
     @full_matcher.handle()
     async def handle_full_message(bot: Bot, event: QQMessageEvent) -> None:
-        await _record_full_message(bot, event)
+        config = get_plugin_config(AiChatConfig)
+        incoming = qq_from_event(event, reply=QQReply(bot, event))
+        await _record_full_message(bot, event, incoming=incoming)
+        if config.group_autotrigger:
+            await maybe_autotrigger(bot, event, config=config, incoming=incoming)
 
 
 @command_matcher.handle()
