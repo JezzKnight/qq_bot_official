@@ -56,6 +56,7 @@ class VideoConfig:
     ytdlp_cookies: str = ""
     download_timeout: float = 180.0
     ytdlp_timeout: float = 240.0
+    job_timeout: float = 1800.0
 
     @classmethod
     def from_env(cls) -> VideoConfig:
@@ -74,4 +75,5 @@ class VideoConfig:
             ytdlp_cookies=os.getenv("VIDEO_YTDLP_COOKIES", "").strip(),
             download_timeout=_float_env("VIDEO_DOWNLOAD_TIMEOUT", 180.0),
             ytdlp_timeout=_float_env("VIDEO_YTDLP_TIMEOUT", 240.0),
+            job_timeout=_float_env("VIDEO_JOB_TIMEOUT", 1800.0),
         )

@@ -20,6 +20,7 @@ from qq_bot.platform.reply import split_for_reply
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import get_client_for_model
 from qq_bot.services.memory_writing import get_memory
+from qq_bot.video.config import VideoConfig
 from qq_bot.video.pipeline import VideoAgent
 
 if TYPE_CHECKING:
@@ -31,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 VIDEO_ACK = "我去看看这个视频 稍等一下"
 MAX_VIDEO_NOTE_CHARS = 6000
-JOB_TIMEOUT_SECONDS = 420.0
 
 _active_jobs: dict[tuple[int, str], asyncio.Task[None]] = {}
 
@@ -97,8 +97,10 @@ async def _run_video_job(job: VideoJob) -> None:
     note = ""
     answer = ""
     try:
-        async with asyncio.timeout(JOB_TIMEOUT_SECONDS):
+        config = VideoConfig.from_env()
+        async with asyncio.timeout(config.job_timeout):
             agent = VideoAgent(
+                config=config,
                 usage_recorder=token_usage.record,
                 note_store=await get_memory(),
             )
