@@ -39,7 +39,7 @@ class ShortTermConfig:
 class CompressionConfig:
     trigger_turns: int = 30
     summary_max_tokens: int = 500
-    model: str = "deepseek-v4-flash"
+    model: str = "deepseek-v41-flash"
     full_rebuild_every: int = 10
 
 

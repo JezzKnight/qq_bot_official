@@ -138,7 +138,7 @@ class OpenaiCompatClient:
         'id': 'e381c2d8-aa9d-405a-af61-b4c51361d40d', 
         'object': 'chat.completion', 
         'created': 1779873438, 
-        'model': 'deepseek-v4-flash', 
+        'model': 'deepseek-flash', 
         'choices': [{
             'index': 0, 
             'message': {

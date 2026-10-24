@@ -48,11 +48,17 @@ class ModelSpec:
     name: str
     base_url: str
     api_key_env: str = ""
+    api_model: str = ""
     params: ModelParams = field(default_factory=ModelParams)
 
     @property
     def api_key(self) -> str:
         return _env(self.api_key_env)
+
+    @property
+    def provider_model(self) -> str:
+        """真正发给平台 API 的 model 字段：未单独配置时等于展示名。"""
+        return self.api_model or self.name
 
 
 class ModelRegistry:
@@ -66,6 +72,7 @@ class ModelRegistry:
         path: Path,
     ) -> None:
         self._models = {m.name: m for m in models}
+        self._by_api = {m.provider_model: m for m in models}
         self._order = [m.name for m in models]
         self.default_model_name = default_model or (
             self._order[0] if self._order else ""
@@ -80,8 +87,17 @@ class ModelRegistry:
         return self._models.get(name)
 
     def resolve(self, name: str) -> ModelSpec | None:
-        """按名取模型；未命中回退默认模型（默认也不存在时返回 None）。"""
-        return self._models.get(name) or self._models.get(self.default_model_name)
+        """按展示名或平台 model 字段取模型；未命中回退默认模型。"""
+        return (
+            self._models.get(name)
+            or self._by_api.get(name)
+            or self._models.get(self.default_model_name)
+        )
+
+    def api_name(self, name: str) -> str:
+        """展示名 → 平台 model 字段；未知名字原样返回。"""
+        spec = self.resolve(name)
+        return spec.provider_model if spec else name
 
     def params_for(self, name: str) -> ModelParams:
         spec = self.resolve(name)
@@ -146,6 +162,7 @@ def load_registry(path: str | Path | None = None) -> ModelRegistry:
                 name=name,
                 base_url=str(item["base_url"]).strip(),
                 api_key_env=str(item.get("api_key_env") or "").strip(),
+                api_model=str(item.get("api_model") or name).strip(),
                 params=_as_params(item.get("params"), base),
             )
         )

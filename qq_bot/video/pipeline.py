@@ -15,6 +15,7 @@ import httpx
 from qq_bot.platform.ports import MediaRef
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
+    api_model_name,
     default_model_name,
     get_client_for_model,
     get_model_params,
@@ -46,7 +47,8 @@ class VideoAgent:
         note_store: VideoNoteStore | None = None,
     ) -> None:
         self.config = config or VideoConfig.from_env()
-        self.model = model or self.config.vision_model or default_model_name()
+        raw_model = model or self.config.vision_model or default_model_name()
+        self.model = api_model_name(raw_model)
         self.usage_recorder = usage_recorder
         self.note_store = note_store
 

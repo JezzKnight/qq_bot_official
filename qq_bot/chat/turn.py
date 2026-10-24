@@ -32,6 +32,7 @@ from qq_bot.platform.reply import MAX_CHUNK_CHARS, send_reply_chunks, split_for_
 from qq_bot.search.retry import RETRY_ACK, looks_insufficient
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
+    api_model_name,
     default_model_name,
     get_client_for_model,
     get_model_params,
@@ -289,7 +290,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     for _ in range(MAX_TOOL_ROUNDS):
         response = await client.chat(
             messages=messages,
-            model=model_name,
+            model=api_model_name(model_name),
             temperature=model_params.temperature,
             max_tokens=model_params.max_tokens,
             tools=get_tools_schema(*tool_names),

@@ -16,16 +16,16 @@ from typing import TYPE_CHECKING, Any
 from prompts.loader import PromptLoader
 from prompts.renderer import PromptRenderer
 from qq_bot.ai.types import ChatMessage
-from qq_bot.services.client_factory import get_client_for_model
+from qq_bot.services.client_factory import api_model_name, get_client_for_model
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
 
-CLASSIFY_MODEL = "deepseek-v4-flash"
+CLASSIFY_MODEL = "deepseek-v41-flash"
 CLASSIFY_TIMEOUT_SEC = 2.0
-TRANSITION_MODEL = "deepseek-v4-flash"
+TRANSITION_MODEL = "deepseek-v41-flash"
 TRANSITION_TIMEOUT_SEC = 2.5
 TRANSITION_MAX_CHARS = 60
 CLASSIFY_MAX_CHARS = 200
@@ -135,7 +135,7 @@ async def classify(
         response = await asyncio.wait_for(
             client.chat(
                 messages=messages,
-                model=CLASSIFY_MODEL,
+                model=api_model_name(CLASSIFY_MODEL),
                 temperature=0.0,
                 max_tokens=8,
                 reasoning_effort="none",
@@ -184,7 +184,7 @@ async def generate_transition(  # noqa: PLR0913 —— 生成过渡句需要这�
         response = await asyncio.wait_for(
             client.chat(
                 messages=messages,
-                model=TRANSITION_MODEL,
+                model=api_model_name(TRANSITION_MODEL),
                 temperature=0.8,
                 max_tokens=200,
                 reasoning_effort="none",

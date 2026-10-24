@@ -19,7 +19,7 @@ from qq_bot.chat.session_lock import group_session_key, session_lock
 from qq_bot.memory.assembler import trim_messages
 from qq_bot.platform.reply import send_reply_chunks, split_for_reply
 from qq_bot.services import token_usage
-from qq_bot.services.client_factory import get_client_for_model
+from qq_bot.services.client_factory import api_model_name, get_client_for_model
 from qq_bot.services.memory_writing import get_memory
 from qq_bot.video.config import VideoConfig
 from qq_bot.video.pipeline import VideoAgent
@@ -165,7 +165,7 @@ async def _answer(job: VideoJob, note: str) -> str:
     messages = trim_messages(messages, job.max_context_tokens)
     response = await client.chat(
         messages=messages,
-        model=job.model_name,
+        model=api_model_name(job.model_name),
         temperature=job.temperature,
         max_tokens=min(job.max_tokens, 1200),
     )

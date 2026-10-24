@@ -27,6 +27,11 @@ def get_model_params(model: str) -> ModelParams:
     return get_registry().params_for(model)
 
 
+def api_model_name(model: str) -> str:
+    """展示名 → 真正发给平台 API 的 model 字段（model.yaml 的 api_model）。"""
+    return get_registry().api_name(model)
+
+
 # ── 客户端获取 ───────────────────────────────────────────────
 
 
@@ -43,7 +48,7 @@ async def get_client_for_model(model: str) -> OpenaiCompatClient:
     return _gateway.get_client(
         spec.base_url,
         spec.api_key,
-        default_model=model,
+        default_model=spec.provider_model,
         timeout=params.timeout,
         connect_timeout=params.connect_timeout,
     )

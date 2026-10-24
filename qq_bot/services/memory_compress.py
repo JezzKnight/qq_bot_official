@@ -17,7 +17,7 @@ from qq_bot.memory.compress import (
 )
 from qq_bot.memory.memory_config import get_memory_config
 
-from .client_factory import get_client_for_model
+from .client_factory import api_model_name, get_client_for_model
 from .memory_writing import get_memory
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ async def summarize_with_model(
             ChatMessage(role="system", content=system_prompt),
             ChatMessage(role="user", content="请输出合并后的摘要正文。"),
         ],
-        model=cfg.compression.model,
+        model=api_model_name(cfg.compression.model),
         temperature=0.3,
         max_tokens=max_tokens,
     )

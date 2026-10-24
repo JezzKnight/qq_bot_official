@@ -12,6 +12,7 @@ from qq_bot.search.deepseek import DeepSeekSearchProvider
 from qq_bot.search.pipeline import SearchPipeline
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
+    api_model_name,
     default_model_name,
     get_client_for_model,
 )
@@ -40,7 +41,7 @@ async def _get_pipeline() -> SearchPipeline:
         _pipeline = SearchPipeline(
             TavilyClient(config),
             client,
-            model,
+            api_model_name(model),
             usage_recorder=token_usage.record,
             fast_provider=fast_provider,
         )

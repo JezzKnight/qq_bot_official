@@ -3,6 +3,7 @@
 from qq_bot.agents.search_agent import SearchAgent
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
+    api_model_name,
     default_model_name,
     get_client_for_model,
 )
@@ -23,13 +24,14 @@ SEARCH_AGENT_TOOLS = ("batch_search", "web_fetch")
                 "properties": {
                 "task":{
                     "type": "string",
-                    "description": "搜索任务描述，包含话题、关键实体、用户期望的信息类型。基于完整对话上下文来写。"
+                    "description": "搜索任务描述，包含话题、关键实体、"
+                    "用户期望的信息类型。基于完整对话上下文来写。"
                     }
                 },
                 "required": ["task"]
                 }
 )
-async def search_agent(task: str, model: str | None = None):
+async def search_agent(task: str, model: str | None = None) -> str:
     # 在此处构造client然后注入
     if model is None:
         model = default_model_name()
@@ -37,8 +39,7 @@ async def search_agent(task: str, model: str | None = None):
     # 构建sub agent的工具列表
     tools = get_tools_schema(*SEARCH_AGENT_TOOLS)
     subagent = SearchAgent(
-        client, tools, model, task, TOOLS,
+        client, tools, api_model_name(model), task, TOOLS,
         usage_recorder=token_usage.record,
     )
-    search_res = await subagent.execute(fail_msg="检索任务失败")
-    return search_res
+    return await subagent.execute(fail_msg="检索任务失败")
