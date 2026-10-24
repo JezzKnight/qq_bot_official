@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | v1.8（草案，待评审） |
+| 版本 | v1.10（P1 + P2 已实现） |
 | 日期 | 2026-10-24 |
-| 状态 | 只写设计，未改代码；按 10-24 评审校准：`RATE=0.2`、窗口内倍率 `2.0`、`DAILY_ACTIVE=120`、删除 `WINDOW_REPLIES` |
+| 状态 | P1（存在感/抽奖/窗口/复读）与 P2（关键词）均已落地；按 10-24 评审校准：`RATE=0.2`、窗口内倍率 `2.0`、`DAILY_ACTIVE=120` |
 | 替代 | `qq_bot/chat/autotrigger.py` 的 L1 自动接话、`qq_bot/chat/activation.py` 的打分判定 |
 | 前提 | QQ 官方机器人，个人认证；频控以官方文档为准 |
 
@@ -537,32 +537,36 @@ presence error  group=... code=40034105 action=disable_proactive
 
 ---
 
-## 13.5 实现状态（P1，2026-10-24）
+## 13.5 实现状态（P1 + P2，2026-10-24）
 
 | 文件 | 状态 |
 |---|---|
-| `qq_bot/chat/presence.py` | 新增：状态机、抽奖、窗口、双冷却、静默、黑名单、可接性、复读检测、失败熔断 |
-| `qq_bot/chat/autotrigger.py` | 改为薄适配层：`maybe_autotrigger` 入口不变，负责转事件、发送、记账 |
+| `qq_bot/chat/presence.py` | 新增：状态机、抽奖、窗口、双冷却、静默、黑名单、可接性、复读检测、关键词开窗、回钩、失败熔断 |
+| `qq_bot/chat/relevance.py` | 新增（P2）：关键词三语境判定（规则快路 + flash 兜底）、过渡句生成与清洗 |
+| `qq_bot/chat/autotrigger.py` | 改为薄适配层：`maybe_autotrigger` 入口不变，负责转事件、关键词分流、发送、记账 |
 | `qq_bot/chat/activation.py` | 删除（打分/veto/实词重叠全部移除） |
 | `qq_bot/chat/passive_window.py` | 保留，@ 路径继续登记（P1 的主动消息不再从它取通道） |
+| `prompts/chat/keyword_transition.md` | 新增（P2）：过渡句指令模板 |
 | `qq_bot/plugins/qqbot_official/__init__.py` | `_dispatch` 接入静默词/解除；`handle_full_message` 改调新编排层 |
-| `qq_bot/services/config.py` | `group_autotrigger_*` 换成 `group_presence_*`（旧字段删除） |
+| `qq_bot/services/config.py` | `group_autotrigger_*` 换成 `group_presence_*`；P2 追加 keyword/hook 字段 |
 | `.env.example` / `.env` | 同步新变量名 |
-| `tests/test_presence.py` | 新增 36 例；`tests/test_autotrigger.py` 删除 |
+| `tests/test_presence.py` | 新增 47 例（P1 + P2） |
+| `tests/test_relevance.py` | 新增（P2）9 例 |
 
 实现细节（与文档的对应关系）：
 
-- 抽奖在 `observe_active`：可接性 → 复读 → `AWAKE` 分支（`p = RATE × RATE_IN_WINDOW`）或 `SLEEPING` 分支（`p = RATE`）；纯图再乘 `IMAGE_RATE_MULT`。
+- 抽奖在 `observe_active`：可接性 → 回钩 → 复读 → `AWAKE` 分支（`p = RATE × RATE_IN_WINDOW`）或 `SLEEPING` 分支（`p = RATE`）；纯图再乘 `IMAGE_RATE_MULT`。
 - 复读键 = `(被 @ openid 序列, 归一化文本)`；发送按原消息段重建（`MessageSegment.mention_user`），不写 `last_spoke_at`，只计入日上限；同一波 90 秒去重。
 - 静默：`observe_passive` 命中词 → 返回 `MUTE_ACK`，插件只发回执、不再跑 turn；触发那条消息的 ack 用 `mute_trigger_id` 排除，不会秒解除。
+- 关键词：`find_keyword` 命中后走 `fast_kind` 规则快路，歧义才调 `deepseek-v4-flash`（`max_tokens=8`，2 秒超时，fail-closed 到 `HOMONYM`）；`CALL` 直接跑 turn（不加 `AUTO_HINT`），`ABOUT` 生成过渡句并主动发出，开 `KEYWORD_WINDOW` 与 `HOOK`；`HOMONYM` 跳过，不抽奖。
+- 回钩：`ABOUT` 后 `HOOK_SEC` 内第一条可接消息直接回复（`HOOK_RATE` 默认 1.0），只用一次；`ABOUT` 的 0-1 抽奖在回钩之后才走。
 - 失败：`40034105` → 该群 `active_ok=False`；`40034006`/`429` → 关窗并冷却；网络错误连续 2 次 → 当天关闭主动。
-- 被动窗口仍登记，但 P1 的主动消息直接走 `send_to_group`；`passive_window` 的 `acquire` 目前没有调用方（保留给后续「@ 后窗口内接话」优化）。
 
 已知偏差：
 
 1. 复读的「同波 90 秒去重」按 §6.7 保留，不是限频，但实际效果是同一句话 90 秒内最多复读一次。
 2. `note_failure` 的冷却秒数是实现里写死的（300/60/30），未做成 env；等实盘再参数化。
-3. `CONTEXT_MESSAGES`、`KEYWORDS` 已进配置但 P1 不读取。
+3. 关键词判定默认模型是 `deepseek-v4-flash`；`KEYWORD_HOMONYM_MODE` 目前只实现 `skip`，`playful` 留接口。
 
 ## 14. 开放问题（评审时定）
 

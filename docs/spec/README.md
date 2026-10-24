@@ -4,7 +4,7 @@
 |---|---|
 | [`group-presence.md`](group-presence.md) | 群聊存在感（Presence）与自动接话：状态机、0-1 抽奖、窗口、双冷却、静默、黑名单、可接性过滤、复读机、参数表、测试矩阵、迁移与分期 |
 
-当前进度：**v1.9，P1 已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机）。P2（关键词）待开工。
+当前进度：**v1.10，P1 + P2 均已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机 / 关键词三语境 + 回钩）。
 
 版本变化：
 
@@ -17,6 +17,7 @@
 - v1.7：按 5 人小群校准——`RATE=0.2`、`RATE_IN_WINDOW=2.0`（窗口内实际 0.4）。
 - v1.8：删除 `WINDOW_REPLIES`（窗口内不再限条数，靠概率 × 冷却 × 日上限）；`DAILY_ACTIVE` 提到 120。
 - v1.9：P1 落地（`qq_bot/chat/presence.py` + 薄适配层 `autotrigger.py`），`activation.py` 退役，新增 `tests/test_presence.py`（36 例）。
+- v1.10：P2 落地——`qq_bot/chat/relevance.py` 三语境判定 + 过渡句生成、`prompts/chat/keyword_transition.md`、回钩与关键词冷却；`tests/test_relevance.py`（9 例）与 presence 追加 10 例。
 
 已知约束（来自官方文档）：
 

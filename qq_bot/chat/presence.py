@@ -57,6 +57,9 @@ class Action(str, Enum):
     REPEAT = "repeat"
     MUTE_ACK = "mute_ack"
     UNMUTE = "unmute"
+    KEYWORD_CALL = "keyword_call"
+    KEYWORD_ABOUT = "keyword_about"
+    HOOK = "hook"
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,15 @@ class PresenceConfig:
     repeat_min_users: int = 3
     repeat_window_sec: float = 90.0
     repeat_max_chars: int = 20
+    keywords: tuple[str, ...] = ("大肥鱼",)
+    keyword_cooldown_sec: float = 120.0
+    keyword_user_cooldown_sec: float = 300.0
+    keyword_window_sec: float = 300.0
+    hook_sec: float = 120.0
+    hook_rate: float = 1.0
+    keyword_homonym_mode: str = "skip"
+    keyword_context_messages: int = 15
+    keyword_fallback: str = "什么意思"
 
 
 @dataclass
@@ -141,6 +153,10 @@ class GroupPresence:
     active_ok: bool = True
     failures: int = 0
     recent_ids: list[str] = field(default_factory=list)
+    keyword_until: float = 0.0
+    user_keyword_at: dict[str, float] = field(default_factory=dict)
+    hook_until: float = 0.0
+    hook_used: bool = False
 
     def reset_day(self, today: str) -> None:
         if self.day != today:
@@ -212,6 +228,7 @@ class PresenceManager:
             group.state = PresenceState.MUTED
             group.mute_until = now + config.mute_sec
             group.mute_trigger_id = message_id
+            group.hook_until = 0.0
             logger.info(
                 "presence mute group=%s by=%s trigger=%s until=%.0f",
                 group_key,
@@ -238,9 +255,73 @@ class PresenceManager:
             return Decision(Action.UNMUTE, "passive", group_key, group.state)
         return Decision(Action.NONE, "passive", group_key, group.state)
 
+    # ── 关键词路径（名字出现）────────────────────────────────────────
+
+    def observe_keyword(  # noqa: C901, PLR0911, PLR0913
+        self,
+        *,
+        group_key: str,
+        user_key: str,
+        kind: str,
+        message_id: str,
+        config: PresenceConfig,
+        now: float,
+    ) -> Decision:
+        """名字命中后的判定；``kind`` 是 ``relevance.KeywordKind`` 的值。"""
+        group = self._group(group_key, now)
+        self._expire(group_key, group, now)
+        if not config.enabled:
+            return self._skip_group(group_key, group, "disabled")
+        if group.state is PresenceState.MUTED:
+            return self._skip_group(group_key, group, "muted")
+        if user_key in config.ignore_openids:
+            return self._skip_group(group_key, group, "ignore")
+        if not group.active_ok:
+            return self._skip_group(group_key, group, "proactive_disabled")
+        if message_id and message_id in group.recent_ids:
+            return self._skip_group(group_key, group, "duplicate")
+        self._remember(group, message_id)
+        if kind == "homonym":
+            return self._skip_group(group_key, group, "homonym")
+        if group.state is PresenceState.AWAKE:
+            # 窗口里再提名字：不重复开窗、不重复过渡，交回 0-1 正常判定
+            return self._skip_group(group_key, group, "keyword_awake")
+        if group.daily_count >= config.daily_active:
+            return self._skip_group(group_key, group, "daily_cap")
+        if now < group.keyword_until:
+            return self._skip_group(group_key, group, "keyword_cooldown")
+        user_last = group.user_keyword_at.get(user_key, float("-inf"))
+        if now < user_last + config.keyword_user_cooldown_sec:
+            return self._skip_group(group_key, group, "keyword_user_cooldown")
+
+        group.keyword_until = now + config.keyword_cooldown_sec
+        group.user_keyword_at[user_key] = now
+        group.state = PresenceState.AWAKE
+        is_call = kind == "call"
+        group.expires_at = now + (
+            config.window_sec if is_call else config.keyword_window_sec
+        )
+        if not is_call:
+            group.hook_until = now + config.hook_sec
+            group.hook_used = False
+        logger.info(
+            "presence keyword group=%s by=%s kind=%s expires=%.0f",
+            group_key,
+            user_key,
+            kind,
+            group.expires_at,
+        )
+        return Decision(
+            Action.KEYWORD_CALL if is_call else Action.KEYWORD_ABOUT,
+            kind,
+            group_key,
+            group.state,
+            threshold=config.hook_rate,
+        )
+
     # ── 主动路径（0-1 / 复读）────────────────────────────────────────
 
-    def observe_active(  # noqa: PLR0911 —— 早退即否决，逐个 return 最清楚
+    def observe_active(  # noqa: C901, PLR0911
         self,
         event: PresenceEvent,
         *,
@@ -264,6 +345,19 @@ class PresenceManager:
         if event.message_id and event.message_id in group.recent_ids:
             return self._skip(event, group, "duplicate")
         self._remember(group, event.message_id)
+
+        if (
+            group.hook_until > now
+            and not group.hook_used
+            and is_acceptable(event)
+            and (config.hook_rate >= 1.0 or _roll(roll) < config.hook_rate)
+        ):
+            group.hook_used = True
+            group.hook_until = 0.0
+            logger.info(
+                "presence hook group=%s roll=%.3f", event.group_key, _roll(roll)
+            )
+            return Decision(Action.HOOK, "hook", event.group_key, group.state)
 
         if (
             config.repeat_enabled
@@ -447,6 +541,7 @@ class PresenceManager:
             group.state = PresenceState.SLEEPING
             group.mute_until = 0.0
             group.mute_trigger_id = ""
+            group.hook_until = 0.0
         if group.state is PresenceState.AWAKE and now >= group.expires_at:
             self._close(group_key, group, "timeout", None, now)
             return True
@@ -464,6 +559,7 @@ class PresenceManager:
             return
         group.state = PresenceState.SLEEPING
         group.expires_at = 0.0
+        group.hook_until = 0.0
         group.wake_cooldown_until = now + (
             config.wake_cooldown_sec if config is not None else 300.0
         )
@@ -522,6 +618,17 @@ class PresenceManager:
             threshold=threshold,
         )
 
+    def _skip_group(
+        self, group_key: str, group: GroupPresence, reason: str
+    ) -> Decision:
+        logger.info(
+            "presence skip group=%s reason=%s state=%s",
+            group_key,
+            reason,
+            group.state.value,
+        )
+        return Decision(Action.NONE, reason, group_key, group.state)
+
 
 def _roll(value: float | None) -> float:
     return random.random() if value is None else value
@@ -563,6 +670,21 @@ def config_from(settings: Any) -> PresenceConfig:
         repeat_min_users=int(get("group_presence_repeat_min_users", 3)),
         repeat_window_sec=float(get("group_presence_repeat_window_sec", 90)),
         repeat_max_chars=int(get("group_presence_repeat_max_chars", 20)),
+        keywords=_split_words(get("group_presence_keywords", "大肥鱼")),
+        keyword_cooldown_sec=float(
+            get("group_presence_keyword_cooldown_sec", 120)
+        ),
+        keyword_user_cooldown_sec=float(
+            get("group_presence_keyword_user_cooldown_sec", 300)
+        ),
+        keyword_window_sec=float(get("group_presence_keyword_window_sec", 300)),
+        hook_sec=float(get("group_presence_hook_sec", 120)),
+        hook_rate=float(get("group_presence_hook_rate", 1.0)),
+        keyword_homonym_mode=str(get("group_presence_keyword_homonym_mode", "skip")),
+        keyword_context_messages=int(
+            get("group_presence_keyword_context_messages", 15)
+        ),
+        keyword_fallback=str(get("group_presence_keyword_fallback", "什么意思")),
     )
 
 

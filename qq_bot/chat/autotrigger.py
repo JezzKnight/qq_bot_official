@@ -18,7 +18,7 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from qq_bot.chat import presence
+from qq_bot.chat import presence, relevance
 from qq_bot.chat.presence import (
     Action,
     Decision,
@@ -90,6 +90,8 @@ async def maybe_autotrigger(  # noqa: PLR0913 —— 入口签名由插件固定
     roll: float | None = None,
     send_text: Callable[[str], Awaitable[None]] | None = None,
     send_repeat: Callable[[RepeatPayload], Awaitable[None]] | None = None,
+    classify: Callable[[str, str], Awaitable[Any]] | None = None,
+    generate: Callable[..., Awaitable[str | None]] | None = None,
 ) -> bool:
     """群聊存在感入口：任何异常都在这里被吞掉，绝不打扰用户。"""
     try:
@@ -103,6 +105,8 @@ async def maybe_autotrigger(  # noqa: PLR0913 —— 入口签名由插件固定
             roll=roll,
             send_text=send_text,
             send_repeat=send_repeat,
+            classify=classify,
+            generate=generate,
         )
     except asyncio.CancelledError:
         raise
@@ -111,7 +115,7 @@ async def maybe_autotrigger(  # noqa: PLR0913 —— 入口签名由插件固定
         return False
 
 
-async def _maybe_autotrigger(  # noqa: PLR0911, PLR0913 —— 内部编排
+async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0913
     bot: Any,
     event: Any,
     *,
@@ -122,6 +126,8 @@ async def _maybe_autotrigger(  # noqa: PLR0911, PLR0913 —— 内部编排
     roll: float | None,
     send_text: Callable[[str], Awaitable[None]] | None,
     send_repeat: Callable[[RepeatPayload], Awaitable[None]] | None,
+    classify: Callable[[str, str], Awaitable[Any]] | None,
+    generate: Callable[..., Awaitable[str | None]] | None,
 ) -> bool:
     group_key = getattr(event, "group_openid", "") or ""
     if not group_key:
@@ -138,6 +144,53 @@ async def _maybe_autotrigger(  # noqa: PLR0911, PLR0913 —— 内部编排
 
     clock = _clock(now)
     presence_event = _presence_event(event, incoming, cfg)
+
+    keyword = relevance.find_keyword(presence_event.text, cfg.keywords)
+    if keyword and not presence_event.is_command and not presence_event.mentions_other:
+        kind = await _classify(presence_event.text, keyword, classify)
+        decision = presence.manager.observe_keyword(
+            group_key=group_key,
+            user_key=incoming.user_key,
+            kind=kind,
+            message_id=incoming.message_id,
+            config=cfg,
+            now=clock,
+        )
+        logger.info(
+            "presence decide group=%s state=%s action=%s reason=%s kind=%s",
+            group_key,
+            decision.state.value,
+            decision.action.value,
+            decision.reason,
+            kind,
+        )
+        if decision.action is Action.KEYWORD_CALL:
+            return await _speak(
+                bot,
+                event,
+                incoming,
+                config=config,
+                decision=decision,
+                clock=clock,
+                dispatch=dispatch,
+                send_text=send_text,
+                hint="",
+            )
+        if decision.action is Action.KEYWORD_ABOUT:
+            return await _about(
+                bot,
+                event,
+                incoming,
+                keyword=keyword,
+                config=cfg,
+                decision=decision,
+                clock=clock,
+                generate=generate,
+                send_text=send_text,
+            )
+        if decision.reason != "keyword_awake":
+            return False
+
     decision = presence.manager.observe_active(
         presence_event, config=cfg, now=clock, roll=roll
     )
@@ -176,10 +229,14 @@ async def _speak(  # noqa: PLR0913
     clock: float,
     dispatch: Callable[[Any, Any], Awaitable[Any]] | None,
     send_text: Callable[[str], Awaitable[None]] | None,
+    hint: str = AUTO_HINT,
 ) -> bool:
     """跑一轮真实 turn，把结果记为一条主动消息。"""
     group_key = decision.group_key
-    text = f"{AUTO_HINT}{incoming.text}" if incoming.text else AUTO_HINT
+    if hint:
+        text = f"{hint}{incoming.text}" if incoming.text else hint
+    else:
+        text = incoming.text
     sender = send_text or _proactive_text(bot, event)
     try:
         if dispatch is not None:
@@ -205,6 +262,104 @@ async def _speak(  # noqa: PLR0913
         decision.action.value,
     )
     return True
+
+
+async def _about(  # noqa: PLR0913 —— 过渡句需要这些上下文
+    bot: Any,
+    event: Any,
+    incoming: Incoming,
+    *,
+    keyword: str,
+    config: PresenceConfig,
+    decision: Decision,
+    clock: float,
+    generate: Callable[..., Awaitable[str | None]] | None,
+    send_text: Callable[[str], Awaitable[None]] | None,
+) -> bool:
+    """``ABOUT``：生成过渡句后主动发出，不跑工具链。"""
+    group_key = decision.group_key
+    text = await _transition(
+        keyword=keyword, incoming=incoming, config=config, generate=generate
+    )
+    sender = send_text or _proactive_text(bot, event)
+    try:
+        await sender(text)
+    except Exception as exc:  # noqa: BLE001 —— 过渡失败只记账
+        code = int(getattr(exc, "code", 0) or 0)
+        logger.warning(
+            "presence transition failed group=%s code=%s（不重试）", group_key, code
+        )
+        presence.manager.note_failure(group_key, code=code, now=clock)
+        return False
+    presence.manager.note_spoken(group_key, now=clock)
+    logger.info(
+        "presence transition group=%s keyword=%s text=%r daily=%s",
+        group_key,
+        keyword,
+        text,
+        presence.manager.daily_count(group_key, now=clock),
+    )
+    return True
+
+
+async def _transition(
+    *,
+    keyword: str,
+    incoming: Incoming,
+    config: PresenceConfig,
+    generate: Callable[..., Awaitable[str | None]] | None,
+) -> str:
+    """生成过渡句；任何失败都回退到兜底句。"""
+    nick = incoming.display_name or "有人"
+    if generate is not None:
+        value = await generate(keyword=keyword, text=incoming.text, nick=nick)
+    else:
+        window, summary = await _keyword_context(incoming, config)
+        value = await relevance.generate_transition(
+            keyword=keyword,
+            text=incoming.text,
+            nick=nick,
+            group_window=window,
+            summary=summary,
+        )
+    return value or config.keyword_fallback
+
+
+async def _classify(
+    text: str,
+    keyword: str,
+    classify: Callable[[str, str], Awaitable[Any]] | None,
+) -> str:
+    if classify is not None:
+        value = await classify(text, keyword)
+    else:
+        value = await relevance.classify(text, keyword)
+    return str(getattr(value, "value", value))
+
+
+async def _keyword_context(
+    incoming: Incoming, config: PresenceConfig
+) -> tuple[list[Any], str | None]:
+    """读群摘要与群窗口（**不含**个人线程），失败就当没有上下文。"""
+    try:
+        from qq_bot.services.memory_writing import get_memory
+
+        memory = await get_memory()
+        if memory is None:
+            return [], None
+        thread_id = await memory.ensure_thread(
+            kind="group_member",
+            group_id=incoming.group_key,
+            user_id=incoming.user_key,
+        )
+        window = await memory.group_window(
+            incoming.group_key, thread_id, config.keyword_context_messages
+        )
+        summary = await memory.latest_summary(incoming.group_key)
+        return list(window), summary
+    except Exception:
+        logger.warning("keyword context unavailable, fallback", exc_info=True)
+        return [], None
 
 
 async def _repeat(  # noqa: PLR0913, PLR0917

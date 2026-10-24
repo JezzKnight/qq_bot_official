@@ -645,3 +645,276 @@ async def test_autotrigger_swallows_exceptions(monkeypatch) -> None:
         object(), fake_event(), config=cfg(), incoming=fake_incoming(), now=0.0
     )
     assert ok is False
+
+
+# ── P2：关键词触发 ────────────────────────────────────────────────
+
+
+def keyword_config(**overrides: object) -> presence.PresenceConfig:
+    return config_from(cfg(**overrides))
+
+
+def test_observe_keyword_call_opens_regular_window(manager: PresenceManager) -> None:
+    decision = manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=keyword_config(),
+        now=0.0,
+    )
+    assert decision.action is Action.KEYWORD_CALL
+    assert manager.state_of("g1", now=0.0) is PresenceState.AWAKE
+
+
+def test_observe_keyword_about_sets_hook(manager: PresenceManager) -> None:
+    decision = manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="about",
+        message_id="k1",
+        config=keyword_config(),
+        now=0.0,
+    )
+    assert decision.action is Action.KEYWORD_ABOUT
+    hooked = manager.observe_active(
+        event(text="在聊什么呢", message_id="k2"),
+        config=keyword_config(),
+        now=10.0,
+        roll=0.99,
+    )
+    assert hooked.action is Action.HOOK
+    again = manager.observe_active(
+        event(text="继续", message_id="k3"),
+        config=keyword_config(),
+        now=11.0,
+        roll=0.99,
+    )
+    assert again.action is not Action.HOOK
+
+
+def test_observe_keyword_ignored_inside_window(manager: PresenceManager) -> None:
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=keyword_config(),
+        now=0.0,
+    )
+    decision = manager.observe_keyword(
+        group_key="g1",
+        user_key="u2",
+        kind="call",
+        message_id="k2",
+        config=keyword_config(),
+        now=5.0,
+    )
+    assert decision.action is Action.NONE
+    assert decision.reason == "keyword_awake"
+
+
+def test_observe_keyword_group_cooldown(manager: PresenceManager) -> None:
+    config = keyword_config(
+        group_presence_window_sec=0, group_presence_keyword_cooldown_sec=120
+    )
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config,
+        now=0.0,
+    )
+    manager.observe_active(
+        event(text="hi", message_id="k2"), config=config, now=1.0, roll=0.99
+    )
+    decision = manager.observe_keyword(
+        group_key="g1",
+        user_key="u2",
+        kind="call",
+        message_id="k3",
+        config=config,
+        now=2.0,
+    )
+    assert decision.reason == "keyword_cooldown"
+
+
+def test_observe_keyword_user_cooldown(manager: PresenceManager) -> None:
+    config = keyword_config(
+        group_presence_window_sec=0,
+        group_presence_keyword_cooldown_sec=0,
+        group_presence_keyword_user_cooldown_sec=300,
+    )
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config,
+        now=0.0,
+    )
+    manager.observe_active(
+        event(text="hi", message_id="k2"), config=config, now=1.0, roll=0.99
+    )
+    decision = manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k3",
+        config=config,
+        now=2.0,
+    )
+    assert decision.reason == "keyword_user_cooldown"
+
+
+def test_observe_keyword_homonym_skips(manager: PresenceManager) -> None:
+    decision = manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="homonym",
+        message_id="k1",
+        config=keyword_config(),
+        now=0.0,
+    )
+    assert decision.action is Action.NONE
+    assert decision.reason == "homonym"
+    assert manager.state_of("g1", now=0.0) is PresenceState.SLEEPING
+
+
+def test_observe_keyword_respects_mute_blacklist_daily(
+    manager: PresenceManager,
+) -> None:
+    muted = keyword_config()
+    manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="闭嘴",
+        message_id="m0",
+        config=muted,
+        now=0.0,
+    )
+    decision = manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=muted,
+        now=1.0,
+    )
+    assert decision.reason == "muted"
+
+    blocked = keyword_config(group_presence_ignore_openids="u9")
+    decision = manager.observe_keyword(
+        group_key="g2",
+        user_key="u9",
+        kind="call",
+        message_id="k2",
+        config=blocked,
+        now=1.0,
+    )
+    assert decision.reason == "ignore"
+
+    capped = keyword_config(group_presence_daily_active=0)
+    decision = manager.observe_keyword(
+        group_key="g3",
+        user_key="u1",
+        kind="call",
+        message_id="k3",
+        config=capped,
+        now=1.0,
+    )
+    assert decision.reason == "daily_cap"
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_keyword_call_runs_turn_without_hint(monkeypatch) -> None:
+    seen: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        seen.append(incoming.text)
+        await incoming.reply.text("在")
+
+    async def fake_classify(_text: str, _keyword: str) -> str:
+        return "call"
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "大肥鱼 在吗"})),
+        config=cfg(),
+        incoming=fake_incoming("大肥鱼 在吗"),
+        now=0.0,
+        classify=fake_classify,
+        send_text=_collect([]),
+    )
+    assert ok is True
+    assert seen == ["大肥鱼 在吗"]
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_keyword_about_sends_transition() -> None:
+    sent: list[str] = []
+
+    async def fake_classify(_text: str, _keyword: str) -> str:
+        return "about"
+
+    async def fake_generate(**_kwargs: object) -> str:
+        return "哼哼 我听到有人在背后夸我"
+
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "我觉得我的大肥鱼更牛逼"})),
+        config=cfg(),
+        incoming=fake_incoming("我觉得我的大肥鱼更牛逼"),
+        now=0.0,
+        classify=fake_classify,
+        generate=fake_generate,
+        send_text=_collect(sent),
+    )
+    assert ok is True
+    assert sent == ["哼哼 我听到有人在背后夸我"]
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_keyword_falls_back_to_fixed_sentence() -> None:
+    sent: list[str] = []
+
+    async def fake_classify(_text: str, _keyword: str) -> str:
+        return "about"
+
+    async def fake_generate(**_kwargs: object) -> None:
+        return None
+
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "今天大肥鱼没说话"})),
+        config=cfg(),
+        incoming=fake_incoming("今天大肥鱼没说话"),
+        now=0.0,
+        classify=fake_classify,
+        generate=fake_generate,
+        send_text=_collect(sent),
+    )
+    assert ok is True
+    assert sent == ["什么意思"]
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_keyword_homonym_sends_nothing() -> None:
+    sent: list[str] = []
+
+    async def fake_classify(_text: str, _keyword: str) -> str:
+        return "homonym"
+
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "大肥鱼丸好吃吗"})),
+        config=cfg(),
+        incoming=fake_incoming("大肥鱼丸好吃吗"),
+        now=0.0,
+        classify=fake_classify,
+        send_text=_collect(sent),
+    )
+    assert ok is False
+    assert sent == []

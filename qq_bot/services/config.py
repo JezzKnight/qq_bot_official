@@ -47,8 +47,17 @@ class AiChatConfig(BaseModel):
     group_presence_repeat_min_users: int = 3  # 至少几个不同用户重复才算
     group_presence_repeat_window_sec: int = 90  # 重复计数窗口
     group_presence_repeat_max_chars: int = 20  # 超过该字数不参与复读
-    # P2（关键词）预留：先读入，P1 不启用
-    group_presence_keywords: str = ""
+
+    # ── 群聊存在感 · 关键词触发（P2）──
+    group_presence_keywords: str = "大肥鱼"  # 精确子串；只启用全名
+    group_presence_keyword_cooldown_sec: int = 120  # 群级冷却（防刷名字）
+    group_presence_keyword_user_cooldown_sec: int = 300  # 用户级冷却
+    group_presence_keyword_window_sec: int = 300  # ABOUT 语境的窗口长度
+    group_presence_hook_sec: int = 120  # 过渡句之后的回钩有效期
+    group_presence_hook_rate: float = 1.0  # 回钩期内接话概率
+    group_presence_keyword_homonym_mode: str = "skip"  # 同名异物：skip/playful
+    group_presence_keyword_context_messages: int = 15  # 参考的群消息条数
+    group_presence_keyword_fallback: str = "什么意思"  # 生成失败兜底句
 
     # ── WebSearch配置 ──
     Tavily_key: list[str] = []
