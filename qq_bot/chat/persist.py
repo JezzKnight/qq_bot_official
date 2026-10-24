@@ -19,6 +19,7 @@ async def persist_user(  # noqa: PLR0913 —— 一行的完整列，拆开会�
     sender_id: str,
     sender_name: str,
     user_text: str,
+    external_id: str | None = None,
 ) -> None:
     """只写用户消息；后台任务需要先把用户消息落库，再慢慢生成回复。"""
     if memory is None or thread_id is None:
@@ -31,6 +32,7 @@ async def persist_user(  # noqa: PLR0913 —— 一行的完整列，拆开会�
             role="user",
             content=user_text,
             sender_name=sender_name,
+            external_id=external_id,
         )
     except Exception:
         logger.exception("用户消息落库失败（不影响后续回复）")
@@ -96,6 +98,7 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
     usage: Any | None = None,
     model: str | None = None,
     schedule: Callable[[str], None] | None = None,
+    external_id: str | None = None,
 ) -> None:
     """落库一轮完整对话；失败只记日志，不影响已经生成的回复。"""
     await persist_user(
@@ -105,6 +108,7 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
         sender_id=sender_id,
         sender_name=sender_name,
         user_text=user_text,
+        external_id=external_id,
     )
     await persist_assistant(
         memory,

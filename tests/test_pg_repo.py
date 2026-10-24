@@ -159,6 +159,56 @@ async def test_build_context_does_not_overlap(repo) -> None:
     assert not set(mine_text) & set(other_text)
 
 
+async def test_duplicate_external_id_is_ignored(repo) -> None:
+    tid = await repo.ensure_thread("group_member", "G100", "U7")
+    first = await repo.append(
+        thread_id=tid,
+        group_id="G100",
+        sender_id="U7",
+        role="user",
+        content="同一句",
+        sender_name="小明",
+        external_id="M1",
+    )
+    second = await repo.append(
+        thread_id=tid,
+        group_id="G100",
+        sender_id="U7",
+        role="user",
+        content="同一句",
+        sender_name="小明",
+        external_id="M1",
+    )
+    assert first > 0
+    assert second == 0
+    history = await repo.history(tid, 10)
+    assert [m.content for m in history] == ["同一句"]
+    assert history[0].external_id == "M1"
+
+
+async def test_build_context_excludes_current_message(repo) -> None:
+    from qq_bot.memory.assembler import build_context
+
+    tid = await repo.ensure_thread("group_member", "G100", "U7")
+    await repo.append(
+        thread_id=tid,
+        group_id="G100",
+        sender_id="U7",
+        role="user",
+        content="当前这句",
+        sender_name="小明",
+        external_id="M-now",
+    )
+    cfg = MemoryConfig(
+        short_term=ShortTermConfig(thread_window=10),
+        budget=BudgetConfig(thread_window=10_000),
+    )
+    parts = await build_context(
+        repo, thread_id=tid, group_id=None, config=cfg, exclude_external_id="M-now"
+    )
+    assert parts.thread_window == []
+
+
 async def test_budget_trims_oldest() -> None:
     from qq_bot.ai.types import ChatMessage
     from qq_bot.memory.assembler import trim_by_budget

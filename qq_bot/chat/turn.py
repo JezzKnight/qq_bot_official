@@ -179,6 +179,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
             thread_id=thread_id,
             group_id=gid,
             config=get_memory_config(),
+            exclude_external_id=incoming.message_id,
         )
 
     system_part = prompt_service.get_system_prompt()
@@ -261,6 +262,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 sender_id=uid,
                 sender_name=sender_name,
                 user_text=f"{identity_tag}\n{incoming.text}",
+                external_id=incoming.message_id,
             )
             question = incoming.text.strip() or "请总结这个视频的内容"
             start_video_job(
@@ -451,6 +453,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         model=model_name,
         sticker=pending_sticker[0] if pending_sticker is not None else None,
         schedule=_compression_scheduler(incoming),
+        external_id=incoming.message_id,
     )
     logger.info("TURN persist done")
 

@@ -81,15 +81,19 @@ class PgRepository:
         cached_tokens: int = 0,
         llm_calls: int = 0,
         model: str | None = None,
+        external_id: str | None = None,
     ) -> int:
         row = await self.pool.fetchrow(
             """
             INSERT INTO messages
                 (thread_id, group_id, sender_id, sender_name, role, content,
                  tool_calls, tool_call_id, images,
-                 prompt_tokens, completion_tokens, cached_tokens, llm_calls, model)
+                 prompt_tokens, completion_tokens, cached_tokens, llm_calls, model,
+                 external_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-                    $10, $11, $12, $13, $14)
+                    $10, $11, $12, $13, $14, $15)
+            ON CONFLICT (thread_id, external_id) WHERE external_id IS NOT NULL
+            DO NOTHING
             RETURNING id
             """,
             thread_id,
@@ -106,14 +110,15 @@ class PgRepository:
             cached_tokens,
             llm_calls,
             model,
+            external_id,
         )
-        return int(row["id"])
+        return int(row["id"]) if row is not None else 0
 
     async def history(self, thread_id: int, limit: int) -> list[ChatMessage]:
         """个人线程最近 limit 条，按时间升序返回。"""
         rows = await self.pool.fetch(
             """
-            SELECT role, sender_name, content, tool_call_id, tool_calls
+            SELECT role, sender_name, content, tool_call_id, tool_calls, external_id
               FROM messages WHERE thread_id = $1 ORDER BY id DESC LIMIT $2
             """,
             thread_id,
@@ -127,7 +132,7 @@ class PgRepository:
         """群窗口：他人的最近 limit 条（排除本人线程，保证与个人线程不重叠）。"""
         rows = await self.pool.fetch(
             """
-            SELECT role, sender_name, content, tool_call_id, tool_calls
+            SELECT role, sender_name, content, tool_call_id, tool_calls, external_id
               FROM messages
              WHERE group_id = $1 AND thread_id <> $2
              ORDER BY id DESC LIMIT $3
@@ -850,4 +855,5 @@ class PgRepository:
             content=row["content"],
             tool_call_id=row["tool_call_id"],
             tool_calls=row["tool_calls"],
+            external_id=row.get("external_id"),
         )

@@ -56,10 +56,14 @@ async def build_context(
     thread_id: int,
     group_id: str | None,
     config: MemoryConfig,
+    exclude_external_id: str | None = None,
 ) -> ContextParts:
     parts = ContextParts()
+    thread = await repo.history(thread_id, config.short_term.thread_window)
+    if exclude_external_id:
+        thread = [m for m in thread if m.external_id != exclude_external_id]
     parts.thread_window = trim_by_budget(
-        await repo.history(thread_id, config.short_term.thread_window),
+        thread,
         config.budget.thread_window,
     )
     if group_id is not None:

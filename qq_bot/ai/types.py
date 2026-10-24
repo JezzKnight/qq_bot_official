@@ -13,6 +13,7 @@ class ChatMessage:
     content: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[dict] | None = None
+    external_id: str | None = None  # 平台消息 id，仅用于落库去重
     # DeepSeek 思考模式字段：多轮/工具调用时需原样回传给 API，否则被拒绝
     reasoning_content: str | None = None
     # OpenAI 兼容多模态图片字段（base64 内联，OpenaiCompatClient 转成 vision parts）

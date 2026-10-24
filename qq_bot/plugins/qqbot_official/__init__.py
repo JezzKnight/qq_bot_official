@@ -195,6 +195,7 @@ async def _record_full_message(
         role="user",
         content=f'<user identity id="{uid}" name="{name}"/>\n{content}',
         sender_name=name,
+        external_id=incoming.message_id,
     )
     schedule_compress(gid)
 
