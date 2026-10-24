@@ -35,7 +35,7 @@ class AiChatConfig(BaseModel):
     group_presence_rate: float = 0.2  # 每条可接消息的抽奖概率（0-1）
     group_presence_window_sec: int = 600  # 中奖后在场窗口：10 分钟
     group_presence_rate_in_window: float = 2.0  # 窗口内倍率：p = rate x 本值
-    group_presence_reply_cooldown_sec: int = 15  # 窗口内两次接话的最小间隔
+    group_presence_reply_cooldown_sec: int = 45  # 窗口内两次接话的最小间隔
     group_presence_wake_cooldown_sec: int = 300  # 窗口结束到可再抽奖的间隔
     group_presence_daily_active: int = 120  # 每群每天主动消息上限（行为熔断）
     group_presence_mute_sec: int = 1800  # 「闭嘴」静默时长：30 分钟

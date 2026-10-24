@@ -100,7 +100,7 @@ class PresenceConfig:
     rate: float = 0.2
     window_sec: float = 600.0
     rate_in_window: float = 2.0
-    reply_cooldown_sec: float = 15.0
+    reply_cooldown_sec: float = 45.0
     wake_cooldown_sec: float = 300.0
     daily_active: int = 120
     mute_sec: float = 1800.0
@@ -296,12 +296,11 @@ class PresenceManager:
 
         group.keyword_until = now + config.keyword_cooldown_sec
         group.user_keyword_at[user_key] = now
-        group.state = PresenceState.AWAKE
         is_call = kind == "call"
-        group.expires_at = now + (
-            config.window_sec if is_call else config.keyword_window_sec
-        )
         if not is_call:
+            # 只有 ABOUT 才开场；CALL 只回一次，不把 bot 留在场上刷屏。
+            group.state = PresenceState.AWAKE
+            group.expires_at = now + config.keyword_window_sec
             group.hook_until = now + config.hook_sec
             group.hook_used = False
         logger.info(
@@ -656,7 +655,7 @@ def config_from(settings: Any) -> PresenceConfig:
         rate=float(get("group_presence_rate", 0.2)),
         window_sec=float(get("group_presence_window_sec", 600)),
         rate_in_window=float(get("group_presence_rate_in_window", 2.0)),
-        reply_cooldown_sec=float(get("group_presence_reply_cooldown_sec", 15)),
+        reply_cooldown_sec=float(get("group_presence_reply_cooldown_sec", 45)),
         wake_cooldown_sec=float(get("group_presence_wake_cooldown_sec", 300)),
         daily_active=int(get("group_presence_daily_active", 120)),
         mute_sec=float(get("group_presence_mute_sec", 1800)),

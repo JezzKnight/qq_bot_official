@@ -654,7 +654,7 @@ def keyword_config(**overrides: object) -> presence.PresenceConfig:
     return config_from(cfg(**overrides))
 
 
-def test_observe_keyword_call_opens_regular_window(manager: PresenceManager) -> None:
+def test_observe_keyword_call_answers_once(manager: PresenceManager) -> None:
     decision = manager.observe_keyword(
         group_key="g1",
         user_key="u1",
@@ -664,7 +664,15 @@ def test_observe_keyword_call_opens_regular_window(manager: PresenceManager) -> 
         now=0.0,
     )
     assert decision.action is Action.KEYWORD_CALL
-    assert manager.state_of("g1", now=0.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=0.0) is PresenceState.SLEEPING
+    # 叫一声只回一次；后面的消息不会因为这一声自动变成窗口内接话
+    nxt = manager.observe_active(
+        event(text="在吗", message_id="k2"),
+        config=keyword_config(),
+        now=5.0,
+        roll=0.99,
+    )
+    assert nxt.reason == "rate"
 
 
 def test_observe_keyword_about_sets_hook(manager: PresenceManager) -> None:
@@ -697,7 +705,7 @@ def test_observe_keyword_ignored_inside_window(manager: PresenceManager) -> None
     manager.observe_keyword(
         group_key="g1",
         user_key="u1",
-        kind="call",
+        kind="about",
         message_id="k1",
         config=keyword_config(),
         now=0.0,
