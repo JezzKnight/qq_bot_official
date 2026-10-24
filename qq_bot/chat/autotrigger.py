@@ -18,12 +18,14 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from qq_bot.chat import judge as judge_mod
 from qq_bot.chat import presence, relevance
 from qq_bot.chat.presence import (
     Action,
     Decision,
     PresenceConfig,
     PresenceEvent,
+    PresenceState,
     RepeatPayload,
 )
 from qq_bot.chat.turn import run_turn
@@ -98,6 +100,7 @@ async def maybe_autotrigger(  # noqa: PLR0913 —— 入口签名由插件固定
     send_repeat: Callable[[RepeatPayload], Awaitable[None]] | None = None,
     classify: Callable[[str, str], Awaitable[Any]] | None = None,
     generate: Callable[..., Awaitable[str | None]] | None = None,
+    judge: Callable[..., Awaitable[Any]] | None = None,
 ) -> bool:
     """群聊存在感入口：任何异常都在这里被吞掉，绝不打扰用户。"""
     try:
@@ -113,6 +116,7 @@ async def maybe_autotrigger(  # noqa: PLR0913 —— 入口签名由插件固定
             send_repeat=send_repeat,
             classify=classify,
             generate=generate,
+            judge=judge,
         )
     except asyncio.CancelledError:
         raise
@@ -134,6 +138,7 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0913
     send_repeat: Callable[[RepeatPayload], Awaitable[None]] | None,
     classify: Callable[[str, str], Awaitable[Any]] | None,
     generate: Callable[..., Awaitable[str | None]] | None,
+    judge: Callable[..., Awaitable[Any]] | None,
 ) -> bool:
     group_key = getattr(event, "group_openid", "") or ""
     if not group_key:
@@ -150,6 +155,7 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0913
 
     clock = _clock(now)
     presence_event = _presence_event(event, incoming, cfg)
+    keyword_awake = False
 
     keyword = relevance.find_keyword(presence_event.text, cfg.keywords)
     if keyword and not presence_event.is_command and not presence_event.mentions_other:
@@ -196,9 +202,27 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0913
             )
         if decision.reason != "keyword_awake":
             return False
+        keyword_awake = True
+
+    force = keyword_awake
+    if (
+        not force
+        and cfg.judge_enabled
+        and presence.manager.state_of(group_key, now=clock) is PresenceState.AWAKE
+    ):
+        if not await _judge_and_apply(
+            group_key,
+            incoming,
+            presence_event,
+            cfg,
+            clock,
+            judge,
+        ):
+            return False
+        force = True
 
     decision = presence.manager.observe_active(
-        presence_event, config=cfg, now=clock, roll=roll
+        presence_event, config=cfg, now=clock, roll=roll, force=force
     )
     logger.info(
         "presence decide group=%s state=%s action=%s reason=%s roll=%.3f p=%.3f",
@@ -370,6 +394,86 @@ async def _keyword_context(
     except Exception:
         logger.warning("keyword context unavailable, fallback", exc_info=True)
         return [], None
+
+
+async def _judge_and_apply(  # noqa: PLR0913, PLR0917 —— 需要完整上下文
+    group_key: str,
+    incoming: Incoming,
+    presence_event: PresenceEvent,
+    config: PresenceConfig,
+    clock: float,
+    judge_fn: Callable[..., Awaitable[Any]] | None,
+) -> bool:
+    """AWAKE 窗口内的三态判定；返回 True 表示可以接这条消息。"""
+    if presence.manager.state_of(group_key, now=clock) is not PresenceState.AWAKE:
+        return False
+    if presence_event.mentions_other or not presence.is_acceptable(presence_event):
+        return False
+    action = await _judge_action(incoming, presence_event, config, clock, judge_fn)
+    if action is judge_mod.JudgeAction.SLEEP:
+        presence.manager.close_window(
+            group_key, reason="model_left", config=config, now=clock
+        )
+        logger.info("presence judge group=%s action=sleep", group_key)
+        return False
+    if action is judge_mod.JudgeAction.PASS:
+        closed = presence.manager.note_pass(group_key, config=config, now=clock)
+        logger.info(
+            "presence judge group=%s action=pass closed=%s", group_key, closed
+        )
+        return False
+    logger.info("presence judge group=%s action=reply", group_key)
+    return True
+
+
+async def _judge_action(
+    incoming: Incoming,
+    presence_event: PresenceEvent,
+    config: PresenceConfig,
+    clock: float,  # noqa: ARG001 —— 保留签名，便于以后按时间加权
+    judge_fn: Callable[..., Awaitable[Any]] | None,
+) -> Any:
+    """调判定模型；上下文缺失或失败时一律 PASS。"""
+    recent: list[dict[str, str]] = []
+    bot_last = ""
+    try:
+        from qq_bot.services.memory_writing import get_memory
+
+        memory = await get_memory()
+        if memory is not None:
+            window = await memory.group_window(
+                incoming.group_key, 0, config.judge_context_messages
+            )
+            recent = [
+                {
+                    "role": message.role,
+                    "name": message.sender_name or "",
+                    "content": message.content or "",
+                }
+                for message in window
+            ]
+            bot_last = next(
+                (
+                    message.content or ""
+                    for message in reversed(window)
+                    if message.role == "assistant"
+                ),
+                "",
+            )
+    except Exception:
+        logger.debug("judge context unavailable", exc_info=True)
+
+    fn = judge_fn or judge_mod.judge_in_window
+    try:
+        return await fn(
+            text=presence_event.text,
+            speaker=incoming.display_name or "",
+            recent=recent,
+            bot_last=bot_last,
+        )
+    except Exception:
+        logger.warning("presence judge call failed, treat as pass", exc_info=True)
+        return judge_mod.JudgeAction.PASS
 
 
 async def _repeat(  # noqa: PLR0913, PLR0917

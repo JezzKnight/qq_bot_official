@@ -950,3 +950,129 @@ async def test_autotrigger_keyword_homonym_sends_nothing() -> None:
     )
     assert ok is False
     assert sent == []
+
+
+# ── P3：窗口内模型判定 ───────────────────────────────────────────
+
+
+def test_pass_limit_closes_window(manager: PresenceManager) -> None:
+    config = keyword_config(group_presence_rate=1, group_presence_pass_limit=2)
+    wake = manager.observe_active(
+        event(text="在吗", message_id="a1"), config=config, now=0.0, roll=0.0
+    )
+    assert wake.action is Action.WAKE
+    assert manager.state_of("g1", now=0.0) is PresenceState.AWAKE
+
+    assert manager.note_pass("g1", config=config, now=1.0) is False
+    assert manager.state_of("g1", now=1.0) is PresenceState.AWAKE
+    assert manager.note_pass("g1", config=config, now=2.0) is True
+    assert manager.state_of("g1", now=2.0) is PresenceState.SLEEPING
+
+
+def test_force_reply_ignores_rate(manager: PresenceManager) -> None:
+    config = keyword_config(group_presence_rate=1)
+    manager.observe_active(
+        event(text="在吗", message_id="b1"), config=config, now=0.0, roll=0.0
+    )
+    quiet = keyword_config(group_presence_rate=0.0, group_presence_reply_cooldown_sec=0)
+    decision = manager.observe_active(
+        event(text="聊点别的", message_id="b2"),
+        config=quiet,
+        now=1.0,
+        roll=0.99,
+        force=True,
+    )
+    assert decision.action is Action.IN_WINDOW
+    plain = manager.observe_active(
+        event(text="还是聊点别的", message_id="b3"),
+        config=quiet,
+        now=2.0,
+        roll=0.99,
+    )
+    assert plain.action is Action.NONE
+
+
+def test_close_window_reason_model_left(manager: PresenceManager) -> None:
+    config = keyword_config(group_presence_rate=1)
+    manager.observe_active(
+        event(text="在吗", message_id="c1"), config=config, now=0.0, roll=0.0
+    )
+    manager.close_window("g1", reason="model_left", config=config, now=3.0)
+    assert manager.state_of("g1", now=3.0) is PresenceState.SLEEPING
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_judge_pass_keeps_silent(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        await incoming.reply.text("在")
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    judge = _fake_judge("pass")
+    config = cfg(group_presence_rate=1, group_presence_judge_enabled=True)
+    first = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "在吗"})),
+        config=config,
+        incoming=fake_incoming("在吗", message_id="j1"),
+        now=0.0,
+        roll=0.0,
+        send_text=_collect(sent),
+        judge=judge,
+    )
+    assert first is True
+    await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "他们聊他们的"})),
+        config=config,
+        incoming=fake_incoming("他们聊他们的", message_id="j2"),
+        now=1.0,
+        roll=0.99,
+        send_text=_collect(sent),
+        judge=judge,
+    )
+    assert sent == ["在"]
+    assert presence.manager.state_of("g1", now=1.0) is PresenceState.AWAKE
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_judge_sleep_closes_window(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        await incoming.reply.text("在")
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    config = cfg(group_presence_rate=1, group_presence_judge_enabled=True)
+    await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "在吗"})),
+        config=config,
+        incoming=fake_incoming("在吗", message_id="s1"),
+        now=0.0,
+        roll=0.0,
+        send_text=_collect(sent),
+        judge=_fake_judge("sleep"),
+    )
+    await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "他们聊他们的"})),
+        config=config,
+        incoming=fake_incoming("他们聊他们的", message_id="s2"),
+        now=1.0,
+        roll=0.99,
+        send_text=_collect(sent),
+        judge=_fake_judge("sleep"),
+    )
+    assert sent == ["在"]
+    assert presence.manager.state_of("g1", now=1.0) is PresenceState.SLEEPING
+
+
+def _fake_judge(action: str):
+    from qq_bot.chat.judge import JudgeAction
+
+    async def fake(**_kwargs: object) -> JudgeAction:
+        return JudgeAction(action)
+
+    return fake

@@ -4,7 +4,7 @@
 |---|---|
 | [`group-presence.md`](group-presence.md) | 群聊存在感（Presence）与自动接话：状态机、0-1 抽奖、窗口、双冷却、静默、黑名单、可接性过滤、复读机、参数表、测试矩阵、迁移与分期 |
 
-当前进度：**v1.12，P1 + P2 均已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机 / 关键词三语境 + 回钩）。
+当前进度：**v1.13，P1 + P2 + P3 均已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机 / 关键词三语境 + 回钩 / 窗口内三态判定）。
 
 版本变化：
 
@@ -20,6 +20,7 @@
 - v1.10：P2 落地——`qq_bot/chat/relevance.py` 三语境判定 + 过渡句生成、`prompts/chat/keyword_transition.md`、回钩与关键词冷却；`tests/test_relevance.py`（9 例）与 presence 追加 10 例。
 - v1.12：`AWAKE` 在场时看到消息 @ 了别人，立即退回 `SLEEPING` 并进入唤醒冷却（话题已经交给别人）。
 - v1.11：实盘降噪——关键词 `CALL` 只回一次、不再开 `AWAKE` 窗口；`REPLY_COOLDOWN` 默认 45 秒（`.env` 60）；`prompts/chat/group.md` 增加「先判断在跟谁说」的群聊发言规则。
+- v1.13：P3 窗口内三态判定——`qq_bot/chat/judge.py` 判 `REPLY/PASS/SLEEP`；连续 `PASS` 达到上限退场，判定失败一律 `PASS`；`CALL` 在窗口内强制 `REPLY`。
 
 已知约束（来自官方文档）：
 

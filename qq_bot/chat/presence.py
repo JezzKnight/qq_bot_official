@@ -121,6 +121,10 @@ class PresenceConfig:
     keyword_homonym_mode: str = "skip"
     keyword_context_messages: int = 15
     keyword_fallback: str = "什么意思"
+    judge_enabled: bool = False
+    judge_timeout_sec: float = 1.5
+    judge_context_messages: int = 8
+    pass_limit: int = 3
 
 
 @dataclass
@@ -157,6 +161,7 @@ class GroupPresence:
     user_keyword_at: dict[str, float] = field(default_factory=dict)
     hook_until: float = 0.0
     hook_used: bool = False
+    pass_count: int = 0
 
     def reset_day(self, today: str) -> None:
         if self.day != today:
@@ -327,8 +332,9 @@ class PresenceManager:
         config: PresenceConfig,
         now: float,
         roll: float | None = None,
+        force: bool = False,
     ) -> Decision:
-        """一条非 @ 群消息的完整判定。"""
+        """一条非 @ 群消息的完整判定；``force`` 表示上层已判定要接。"""
         group = self._group(event.group_key, now)
         if self._expire(event.group_key, group, now):
             return self._skip(event, group, "window_timeout")
@@ -386,7 +392,7 @@ class PresenceManager:
             return self._skip(event, group, "not_acceptable")
 
         if group.state is PresenceState.AWAKE:
-            return self._decide_awake(event, group, config, now, roll)
+            return self._decide_awake(event, group, config, now, roll, force=force)
 
         return self._decide_sleeping(event, group, config, now, roll)
 
@@ -396,6 +402,33 @@ class PresenceManager:
         group.last_spoke_at = now
         group.daily_count += 1
         group.failures = 0
+        group.pass_count = 0
+
+    def note_pass(self, group_key: str, *, config: PresenceConfig, now: float) -> bool:
+        """窗口内判定为 PASS：累计连续不接次数，达到上限自动退场。
+
+        返回 ``True`` 表示这次 PASS 触发了退场。
+        """
+        group = self._group(group_key, now)
+        if group.state is not PresenceState.AWAKE:
+            return False
+        group.pass_count += 1
+        if group.pass_count < config.pass_limit:
+            return False
+        self._close(group_key, group, "pass_limit", config, now)
+        return True
+
+    def close_window(
+        self,
+        group_key: str,
+        *,
+        reason: str,
+        config: PresenceConfig,
+        now: float,
+    ) -> None:
+        """外部判定退场（例如窗口内判定 SLEEP）。"""
+        group = self._group(group_key, now)
+        self._close(group_key, group, reason, config, now)
 
     def note_passive(self, group_key: str, *, now: float) -> None:
         """被动回复发出后只更新「上次说话时间」，不占日额度。"""
@@ -444,21 +477,23 @@ class PresenceManager:
 
     # ── 内部 ────────────────────────────────────────────────────────
 
-    def _decide_awake(
+    def _decide_awake(  # noqa: PLR0913 —— 判定需要完整上下文
         self,
         event: PresenceEvent,
         group: GroupPresence,
         config: PresenceConfig,
         now: float,
         roll: float | None,
+        *,
+        force: bool = False,
     ) -> Decision:
         if now < group.last_spoke_at + config.reply_cooldown_sec:
             return self._skip(event, group, "cooldown")
         if group.daily_count >= config.daily_active:
             self._close(event.group_key, group, "daily_cap", config, now)
             return self._skip(event, group, "daily_cap")
-        threshold = _clamp(config.rate * config.rate_in_window)
-        if event.has_image:
+        threshold = 1.0 if force else _clamp(config.rate * config.rate_in_window)
+        if event.has_image and not force:
             threshold *= config.image_rate_mult
         draw = _roll(roll)
         if draw < threshold:
@@ -564,6 +599,7 @@ class PresenceManager:
         group.state = PresenceState.SLEEPING
         group.expires_at = 0.0
         group.hook_until = 0.0
+        group.pass_count = 0
         group.wake_cooldown_until = now + (
             config.wake_cooldown_sec if config is not None else 300.0
         )
@@ -689,6 +725,12 @@ def config_from(settings: Any) -> PresenceConfig:
             get("group_presence_keyword_context_messages", 15)
         ),
         keyword_fallback=str(get("group_presence_keyword_fallback", "什么意思")),
+        judge_enabled=bool(get("group_presence_judge_enabled", False)),
+        judge_timeout_sec=float(get("group_presence_judge_timeout_sec", 1.5)),
+        judge_context_messages=int(
+            get("group_presence_judge_context_messages", 8)
+        ),
+        pass_limit=int(get("group_presence_pass_limit", 3)),
     )
 
 

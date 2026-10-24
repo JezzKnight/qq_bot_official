@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | v1.12（P1 + P2 已实现，实盘降噪） |
+| 版本 | v1.13（P1 + P2 + P3 窗口内判定） |
 | 日期 | 2026-10-24 |
-| 状态 | P1（存在感/抽奖/窗口/复读）与 P2（关键词）均已落地；按 10-24 评审校准：`RATE=0.2`、窗口内倍率 `2.0`、`DAILY_ACTIVE=120` |
+| 状态 | P1/P2/P3 均已落地；P3 默认关闭，`.env` 打开 `JUDGE_ENABLED` 后窗口内先判 `reply/pass/sleep` |
 | 替代 | `qq_bot/chat/autotrigger.py` 的 L1 自动接话、`qq_bot/chat/activation.py` 的打分判定 |
 | 前提 | QQ 官方机器人，个人认证；频控以官方文档为准 |
 
@@ -379,6 +379,24 @@ def on_group_message(msg, now):
 
 ---
 
+### 6.10 窗口内三态判定（P3）
+
+进入 `AWAKE` 后不再"每条必回"：规则先挡住确定的，模糊的交给便宜模型判 `REPLY / PASS / SLEEP`。
+
+| 判定 | 含义 | 动作 |
+|---|---|---|
+| `REPLY` | 这条在跟 bot 说、在接 bot 上一句 | 跑完整 turn |
+| `PASS` | 不接，但留在窗口里等下一句 | 只记账；连续 `PASS_LIMIT` 次 → 退场 |
+| `SLEEP` | 话题已经交给别人 | 立即关窗，进入唤醒冷却 |
+
+规则优先、不过模型：@bot / 名字 `CALL` → `REPLY`；@ 别人 → `SLEEP`；命令/纯表情/纯链接 → 跳过；静默/黑名单/日上限 → 不判定。
+
+模型判定的输入只有：最近 `JUDGE_CONTEXT_MESSAGES` 条群消息 + bot 上一句 + 这条消息；输出一个词；`max_tokens=8`、`temperature=0`、`reasoning_effort="none"`、超时 `JUDGE_TIMEOUT_SEC`。
+
+默认 PASS：判定超时或异常一律 PASS、留在窗口，绝不因为一次失败退场。`CALL` 在窗口内强制 `REPLY`，不再被 0-1 抽奖跳过。
+
+`JUDGE_ENABLED=false` 时退回旧的 `p = RATE × RATE_IN_WINDOW` 抽奖。
+
 ## 7. 参数表
 
 | ENV | 默认 | 范围 | 说明 |
@@ -387,6 +405,10 @@ def on_group_message(msg, now):
 | `GROUP_PRESENCE_RATE` | `0.2` | 0.0–1.0 | 每条合格消息的抽奖概率；0 = 永不出场，1 = 必中（仍受冷却与上限约束） |
 | `GROUP_PRESENCE_WINDOW_SEC` | `600` | 60–3600 | 在场窗口长度 |
 | `GROUP_PRESENCE_RATE_IN_WINDOW` | `2.0` | 0.1–5.0 | 窗口内概率倍率；窗口内 `p = 0.2 × 2.0 = 0.4` |
+| `GROUP_PRESENCE_JUDGE_ENABLED` | `false` | bool | 窗口内是否先让模型判 `reply/pass/sleep`；关 = 退回抽奖 |
+| `GROUP_PRESENCE_JUDGE_TIMEOUT_SEC` | `1.5` | 0.5–5.0 | 判定超时；超时按 `PASS` |
+| `GROUP_PRESENCE_JUDGE_CONTEXT_MESSAGES` | `8` | 3–30 | 判定参考的最近群消息条数 |
+| `GROUP_PRESENCE_PASS_LIMIT` | `3` | 1–10 | 连续 `PASS` 达到该次数自动退场 |
 | `GROUP_PRESENCE_REPLY_COOLDOWN_SEC` | `15` | 0–600 | 发言后冷却；0 = 关闭 |
 | `GROUP_PRESENCE_WAKE_COOLDOWN_SEC` | `300` | 0–3600 | 窗口关闭后的抽奖冷却 |
 | `GROUP_PRESENCE_DAILY_ACTIVE` | `120` | 0–1000 | 每群每天主动条数上限（平台 1000/天，此值为行为熔断） |
@@ -543,12 +565,13 @@ presence error  group=... code=40034105 action=disable_proactive
 
 ---
 
-## 13.5 实现状态（P1 + P2，2026-10-24）
+## 13.5 实现状态（P1 + P2 + P3，2026-10-24）
 
 | 文件 | 状态 |
 |---|---|
 | `qq_bot/chat/presence.py` | 新增：状态机、抽奖、窗口、双冷却、静默、黑名单、可接性、复读检测、关键词开窗、回钩、失败熔断 |
 | `qq_bot/chat/relevance.py` | 新增（P2）：关键词三语境判定（规则快路 + flash 兜底）、过渡句生成与清洗 |
+| `qq_bot/chat/judge.py` | 新增（P3）：窗口内三态判定；失败/超时一律 `PASS` |
 | `qq_bot/chat/autotrigger.py` | 改为薄适配层：`maybe_autotrigger` 入口不变，负责转事件、关键词分流、发送、记账 |
 | `qq_bot/chat/activation.py` | 删除（打分/veto/实词重叠全部移除） |
 | `qq_bot/chat/passive_window.py` | 保留，@ 路径继续登记（P1 的主动消息不再从它取通道） |
@@ -558,6 +581,7 @@ presence error  group=... code=40034105 action=disable_proactive
 | `.env.example` / `.env` | 同步新变量名 |
 | `tests/test_presence.py` | 新增 47 例（P1 + P2） |
 | `tests/test_relevance.py` | 新增（P2）9 例 |
+| `tests/test_judge.py` | 新增（P3）判定解析/格式化/失败兜底 |
 
 实现细节（与文档的对应关系）：
 
