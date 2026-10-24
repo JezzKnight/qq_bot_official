@@ -207,7 +207,7 @@ if _FULL_GROUP:
         config = get_plugin_config(AiChatConfig)
         incoming = qq_from_event(event, reply=QQReply(bot, event))
         await _record_full_message(bot, event, incoming=incoming)
-        if config.group_autotrigger:
+        if config.group_presence_enabled:
             await maybe_autotrigger(bot, event, config=config, incoming=incoming)
 
 
