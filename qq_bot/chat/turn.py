@@ -84,6 +84,21 @@ async def _download_images(incoming: Incoming) -> list[Any]:
     return images
 
 
+def _extra_notes(video_note: str, search_queries: list[str]) -> str | None:
+    """给历史留一条"这轮发生过什么"的注脚。
+
+    检索记录必须落库：工具调用不写历史，否则下一轮模型看不到自己查过，
+    被质疑时会把真查过的信息认成"我没查就编的"。
+    """
+    notes: list[str] = []
+    if video_note:
+        notes.append(f"[视频分析记录，仅供后续对话参考]\n{video_note}")
+    if search_queries:
+        queries = "；".join(dict.fromkeys(search_queries))
+        notes.append(f"[检索记录] 这条回复查过网：{queries}")
+    return "\n\n".join(notes) or None
+
+
 async def _send_pending_sticker(reply: Any, pending: tuple[str, bytes] | None) -> None:
     if pending is None:
         return
@@ -285,6 +300,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     video_ack_sent = False
     video_notes: list[str] = []
     last_search_query = ""
+    search_queries: list[str] = []
     reply_parts_used = 0
     final_content = FALLBACK_TEXT
     for _ in range(MAX_TOOL_ROUNDS):
@@ -362,6 +378,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 else:
                     search_called = True
                     last_search_query = str(args.get("query") or incoming.text)
+                    search_queries.append(last_search_query)
                     tracker: SearchTracker = {
                         "tavily_success": False,
                         "tavily_error_count": 0,
@@ -410,9 +427,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         sender_name=sender_name,
         user_text=f"{identity_tag}\n{incoming.text}",
         assistant_text=final_content,
-        extra_assistant_text=(
-            f"[视频分析记录，仅供后续对话参考]\n{video_note}" if video_note else None
-        ),
+        extra_assistant_text=_extra_notes(video_note, search_queries),
         usage=usage_context.snapshot(),
         model=model_name,
         sticker=pending_sticker[0] if pending_sticker is not None else None,
