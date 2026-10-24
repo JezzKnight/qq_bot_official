@@ -26,8 +26,7 @@ class AiChatConfig(BaseModel):
     cooldown_seconds: int = 5  # 单用户冷却秒数
 
     # ── 回复节奏（活人感：像 QQ 连发，而不是一次吐一屏）──
-    reply_split_max_chars: int = 30  # 单条超过该字数就按标点/空格切条
-    reply_typing_delay: bool = True  # 分段之间按字数模拟打字停顿
+    reply_typing_delay: bool = True  # 分条之间按字数模拟打字停顿
 
     # ── 群聊存在感（P1：0-1 抽奖 + 10 分钟窗口 + 静默 + 复读）──
     # 设计见 docs/spec/group-presence.md；决策在 qq_bot/chat/presence.py。

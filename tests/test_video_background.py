@@ -64,7 +64,6 @@ def _config() -> SimpleNamespace:
         max_context_tokens=4000,
         video_background_enabled=True,
         reply_typing_delay=False,
-        reply_split_max_chars=30,
         bot_self_id="999",
     )
 

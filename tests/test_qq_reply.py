@@ -1,4 +1,4 @@
-"""官方 QQ 回复分段：不超过 4 段，尾部合并；长句按语义断点切条。"""
+"""官方 QQ 回复分条：只按空行切，最多 4 条，尾部合并。"""
 
 from __future__ import annotations
 
@@ -10,74 +10,39 @@ from qq_bot.platform.reply import (
 )
 
 
-def test_short_reply_kept_as_is() -> None:
+def test_blank_line_splits_into_messages() -> None:
     assert split_for_reply("你好\n\n今天吃白饭") == ["你好", "今天吃白饭"]
 
 
-def test_single_newline_also_splits() -> None:
-    # 模型常用单换行分段：短句也要切成两条
-    assert split_for_reply("螶鋒嗰體獽彎欎\n打一遍我手都累了") == [
-        "螶鋒嗰體獽彎欎",
-        "打一遍我手都累了",
-    ]
+def test_single_newline_does_not_split() -> None:
+    # 单个换行只是换行；分条只认空行
+    text = "螶鋒嗰體獽彎欎\n打一遍我手都累了"
+    assert split_for_reply(text) == [text]
 
 
-def test_crlf_splits_too() -> None:
-    assert split_for_reply("甲\r\n乙") == ["甲", "乙"]
+def test_crlf_blank_line_splits() -> None:
+    assert split_for_reply("甲\r\n\r\n乙") == ["甲", "乙"]
 
 
 def test_empty_reply_falls_back_to_single_chunk() -> None:
     assert split_for_reply("   ") == [""]
 
 
-def test_long_reply_merges_tail() -> None:
+def test_long_paragraph_is_not_split_by_length() -> None:
+    text = "很长的一段话" * 30
+    assert split_for_reply(text) == [text]
+
+
+def test_more_than_max_parts_merges_tail() -> None:
     text = "\n\n".join(f"第{i}段" for i in range(1, 8))
     chunks = split_for_reply(text)
     assert len(chunks) == 4
-    assert chunks[0] == "第1段"
+    assert chunks[:3] == ["第1段", "第2段", "第3段"]
+    assert chunks[3] == "\n".join(f"第{i}段" for i in range(4, 8))
 
 
-def test_long_line_splits_on_spaces() -> None:
-    """模型常常写成一大段（我们的风格用空格断句），超长要按空格切开。"""
-    text = (
-        "等下 是哪条 你说 我核一遍 要是真是我给错了 我现在就认 对不起 "
-        "你气的是给错数还不吭声吧 换我也烦"
-    )
-    chunks = split_for_reply(text, max_chars=20)
-    assert len(chunks) > 1
-    assert all(len(chunk) <= 20 for chunk in chunks)
-    assert " ".join(chunks) == text
-
-
-def test_sentence_end_preferred_over_space() -> None:
-    chunks = split_for_reply("第一句结束。第二句也结束。第三句", max_chars=8)
-    assert chunks[0].endswith("。")
-
-
-def test_never_splits_inside_number() -> None:
-    """500N / 1612N 这类是技术回答的命根子，不能被劈开。"""
-    text = "实测是 1612N 断裂 厂家给的单台总成静载只有 2000N 这个差值你得看看"
-    chunks = split_for_reply(text, max_chars=10)
-    assert "1612N" in " ".join(chunks)
-    assert "2000N" in " ".join(chunks)
-
-
-def test_does_not_break_after_dangling_word() -> None:
-    """断在"是/的/了"这类单字后面会把一句话读成半句。"""
-    text = "我查了一圈 GB 7258-2017 的 7.2.9 是 500N 那是操作力 不是结构强度"
-    chunks = split_for_reply(text, max_chars=30)
-    assert not chunks[0].endswith(("是", "的", "了"))
-    assert chunks[1].startswith("是 ")
-
-
-def test_zero_max_chars_disables_splitting() -> None:
-    text = "很长的一段话" * 10
-    assert split_for_reply(text, max_chars=0) == [text]
-
-
-def test_max_parts_holds_after_splitting() -> None:
-    chunks = split_for_reply("很短的话 和别的问题 " * 20, max_parts=3, max_chars=10)
-    assert len(chunks) == 3
+def test_max_parts_one_merges_everything() -> None:
+    assert split_for_reply("甲\n\n乙\n\n丙", max_parts=1) == ["甲\n乙\n丙"]
 
 
 class FakeReply:

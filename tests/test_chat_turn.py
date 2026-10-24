@@ -58,7 +58,6 @@ def _config() -> SimpleNamespace:
         glossary_enabled=False,
         max_context_tokens=4000,
         reply_typing_delay=False,
-        reply_split_max_chars=30,
         bot_self_id="999",
     )
 

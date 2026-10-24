@@ -31,7 +31,7 @@ def _positions(text: str, names: list[str]) -> list[int]:
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 6
+    assert prompt_service.chain_version == 7
     assert all(ref.version.startswith("v") for ref in prompt_service.modules)
 
 

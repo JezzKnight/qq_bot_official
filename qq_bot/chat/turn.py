@@ -28,7 +28,7 @@ from qq_bot.memory.assembler import ContextParts, build_context, trim_messages
 from qq_bot.memory.members import members_xml
 from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.memory.naming import escape_for_prompt
-from qq_bot.platform.reply import MAX_CHUNK_CHARS, send_reply_chunks, split_for_reply
+from qq_bot.platform.reply import send_reply_chunks, split_for_reply
 from qq_bot.search.retry import RETRY_ACK, looks_insufficient
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
@@ -439,11 +439,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     if pending_sticker is not None and max_parts > 1:
         # 给表情包留一次发送额度
         max_parts -= 1
-    chunks = split_for_reply(
-        final_content,
-        max_parts=max_parts,
-        max_chars=getattr(config, "reply_split_max_chars", MAX_CHUNK_CHARS),
-    )
+    chunks = split_for_reply(final_content, max_parts=max_parts)
     await send_reply_chunks(
         incoming.reply,
         chunks,
