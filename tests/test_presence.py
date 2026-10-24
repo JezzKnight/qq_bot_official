@@ -1,0 +1,647 @@
+"""群聊存在感 P1：状态机、静默、复读、可接性与编排层。
+
+纯内存 + 注入时钟/随机数，不碰数据库、不 sleep。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import SimpleNamespace
+
+import pytest
+
+from qq_bot.chat import autotrigger, passive_window, presence
+from qq_bot.chat.presence import (
+    Action,
+    PresenceEvent,
+    PresenceManager,
+    PresenceState,
+    RepeatPayload,
+    config_from,
+)
+from qq_bot.platform.ports import Incoming, MediaRef, PlatformCaps
+
+# ── 构造器 ─────────────────────────────────────────────────────────
+
+
+def cfg(**overrides: object) -> SimpleNamespace:
+    """默认参数取自规格 §7；测试只覆盖关心的字段。"""
+    base: dict[str, object] = {
+        "group_presence_enabled": True,
+        "group_presence_rate": 0.2,
+        "group_presence_window_sec": 600,
+        "group_presence_rate_in_window": 2.0,
+        "group_presence_reply_cooldown_sec": 15,
+        "group_presence_wake_cooldown_sec": 300,
+        "group_presence_daily_active": 120,
+        "group_presence_mute_sec": 1800,
+        "group_presence_mute_words": "闭嘴,别说了,安静",
+        "group_presence_mute_ack": "好",
+        "group_presence_ignore_openids": "",
+        "group_presence_image_rate_mult": 0.5,
+        "group_presence_repeat_enabled": True,
+        "group_presence_repeat_min_users": 3,
+        "group_presence_repeat_window_sec": 90,
+        "group_presence_repeat_max_chars": 20,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def event(  # noqa: PLR0913 —— 构造器字段多
+    *,
+    group_key: str = "g1",
+    user_key: str = "u1",
+    text: str = "在吗",
+    message_id: str = "",
+    has_image: bool = False,
+    is_command: bool = False,
+    mentions_other: bool = False,
+    is_media_only: bool = False,
+    repeat_payload: RepeatPayload | None = None,
+) -> PresenceEvent:
+    return PresenceEvent(
+        group_key=group_key,
+        user_key=user_key,
+        text=text,
+        message_id=message_id,
+        has_image=has_image,
+        is_command=is_command,
+        mentions_other=mentions_other,
+        is_media_only=is_media_only,
+        repeat_payload=repeat_payload,
+    )
+
+
+@pytest.fixture()
+def manager() -> PresenceManager:
+    return PresenceManager()
+
+
+# ── 抽奖与窗口 ─────────────────────────────────────────────────────
+
+
+def test_rate_zero_never_speaks(manager: PresenceManager) -> None:
+    decision = manager.observe_active(
+        event(), config=config_from(cfg(group_presence_rate=0)), now=0.0, roll=0.0
+    )
+    assert decision.action is Action.NONE
+    assert decision.reason == "rate"
+
+
+def test_rate_one_always_wakes(manager: PresenceManager) -> None:
+    decision = manager.observe_active(
+        event(), config=config_from(cfg(group_presence_rate=1)), now=0.0, roll=0.999
+    )
+    assert decision.action is Action.WAKE
+    assert manager.state_of("g1", now=0.0) is PresenceState.AWAKE
+
+
+def test_wake_sets_window_length(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    manager.observe_active(event(), config=config, now=100.0, roll=0.0)
+    group = manager._groups["g1"]
+    assert group.expires_at == 700.0
+
+
+def test_window_reply_cooldown_blocks(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    manager.observe_active(event(), config=config, now=0.0, roll=0.0)
+    manager.note_spoken("g1", now=0.0)
+    decision = manager.observe_active(event(), config=config, now=5.0, roll=0.0)
+    assert decision.action is Action.NONE
+    assert decision.reason == "cooldown"
+
+
+def test_window_speaks_after_cooldown(manager: PresenceManager) -> None:
+    config = config_from(
+        cfg(group_presence_rate=0.2, group_presence_rate_in_window=2.0)
+    )
+    manager.observe_active(event(), config=config, now=0.0, roll=0.0)
+    manager.note_spoken("g1", now=0.0)
+    decision = manager.observe_active(event(), config=config, now=20.0, roll=0.3)
+    assert decision.action is Action.IN_WINDOW
+    assert decision.threshold == pytest.approx(0.4)
+
+
+def test_window_timeout_closes_then_wake_cooldown(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    manager.observe_active(event(), config=config, now=0.0, roll=0.0)
+    decision = manager.observe_active(event(), config=config, now=601.0, roll=0.0)
+    assert decision.reason == "window_timeout"
+    assert manager.state_of("g1", now=601.0) is PresenceState.SLEEPING
+    # 关窗后 300 秒内不能重新中奖
+    decision = manager.observe_active(event(), config=config, now=700.0, roll=0.0)
+    assert decision.reason == "cooldown"
+    decision = manager.observe_active(event(), config=config, now=901.0, roll=0.0)
+    assert decision.action is Action.WAKE
+
+
+def test_daily_cap_closes_window(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1, group_presence_daily_active=1))
+    manager.observe_active(event(), config=config, now=0.0, roll=0.0)
+    manager.note_spoken("g1", now=0.0)
+    decision = manager.observe_active(event(), config=config, now=20.0, roll=0.0)
+    assert decision.reason == "daily_cap"
+    assert manager.state_of("g1", now=20.0) is PresenceState.SLEEPING
+
+
+def test_daily_cap_blocks_sleeping(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1, group_presence_daily_active=0))
+    decision = manager.observe_active(event(), config=config, now=0.0, roll=0.0)
+    assert decision.reason == "daily_cap"
+
+
+def test_image_gets_discounted(manager: PresenceManager) -> None:
+    config = config_from(
+        cfg(group_presence_rate=0.5, group_presence_image_rate_mult=0.5)
+    )
+    decision = manager.observe_active(
+        event(has_image=True, text=""), config=config, now=0.0, roll=0.3
+    )
+    assert decision.reason == "rate"
+    decision = manager.observe_active(
+        event(has_image=True, text=""), config=config, now=0.0, roll=0.2
+    )
+    assert decision.action is Action.WAKE
+
+
+# ── 可接性 ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"text": "/reboot", "is_command": True},
+        {"text": "", "is_media_only": True},
+        {"text": "看这个", "mentions_other": True},
+        {"text": "https://example.com/a"},
+    ],
+)
+def test_unacceptable_messages_never_roll(
+    manager: PresenceManager, kwargs: dict[str, object]
+) -> None:
+    decision = manager.observe_active(
+        event(**kwargs),
+        config=config_from(cfg(group_presence_rate=1)),
+        now=0.0,
+        roll=0.0,
+    )
+    assert decision.action is Action.NONE
+    assert decision.reason == "not_acceptable"
+
+
+def test_duplicate_message_id_ignored(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    manager.observe_active(event(message_id="m1"), config=config, now=0.0, roll=1.0)
+    decision = manager.observe_active(
+        event(message_id="m1"), config=config, now=0.0, roll=0.0
+    )
+    assert decision.reason == "duplicate"
+
+
+def test_ignore_openids_blocks_only_active(manager: PresenceManager) -> None:
+    config = config_from(
+        cfg(group_presence_rate=1, group_presence_ignore_openids="u1, u2")
+    )
+    decision = manager.observe_active(
+        event(user_key="u1"), config=config, now=0.0, roll=0.0
+    )
+    assert decision.reason == "ignore"
+    decision = manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="在吗",
+        message_id="m1",
+        config=config,
+        now=0.0,
+    )
+    assert decision.action is Action.NONE
+
+
+# ── 静默 ───────────────────────────────────────────────────────────
+
+
+def test_mute_ack_and_active_blocked(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    decision = manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="闭嘴",
+        message_id="m1",
+        config=config,
+        now=0.0,
+    )
+    assert decision.action is Action.MUTE_ACK
+    assert decision.ack == "好"
+    active = manager.observe_active(
+        event(text="在吗"), config=config, now=10.0, roll=0.0
+    )
+    assert active.reason == "muted"
+
+
+def test_mute_trigger_ack_does_not_unmute(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="别说了",
+        message_id="m1",
+        config=config,
+        now=0.0,
+    )
+    decision = manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="好",
+        message_id="m1",
+        config=config,
+        now=1.0,
+    )
+    assert decision.reason == "mute_ack_self"
+    assert manager.state_of("g1", now=1.0) is PresenceState.MUTED
+
+
+def test_other_at_message_unmutes(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="安静",
+        message_id="m1",
+        config=config,
+        now=0.0,
+    )
+    decision = manager.observe_passive(
+        group_key="g1",
+        user_key="u2",
+        text="在吗",
+        message_id="m2",
+        config=config,
+        now=5.0,
+    )
+    assert decision.action is Action.UNMUTE
+    assert manager.state_of("g1", now=5.0) is PresenceState.SLEEPING
+
+
+def test_mute_expires(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=1, group_presence_mute_sec=1800))
+    manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="闭嘴",
+        message_id="m1",
+        config=config,
+        now=0.0,
+    )
+    decision = manager.observe_active(
+        event(text="在吗"), config=config, now=1801.0, roll=0.0
+    )
+    assert decision.action is Action.WAKE
+
+
+# ── 复读机 ─────────────────────────────────────────────────────────
+
+
+def _repeat(text: str, mentions: tuple[str, ...] = ()) -> RepeatPayload:
+    parts: list[tuple[str, str]] = []
+    if mentions:
+        parts.extend(("mention", uid) for uid in mentions)
+        parts.append(("text", " " + text))
+    else:
+        parts.append(("text", text))
+    return RepeatPayload(tuple(parts))
+
+
+def test_repeat_three_distinct_users(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    payload = _repeat("难绷")
+    for index in range(2):
+        decision = manager.observe_active(
+            event(user_key=f"u{index}", text="难绷", repeat_payload=payload),
+            config=config,
+            now=float(index),
+            roll=1.0,
+        )
+        assert decision.action is Action.NONE
+    decision = manager.observe_active(
+        event(user_key="u2", text="难绷", repeat_payload=payload),
+        config=config,
+        now=2.0,
+        roll=1.0,
+    )
+    assert decision.action is Action.REPEAT
+    assert decision.payload == payload
+
+
+def test_same_user_spam_never_repeats(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    payload = _repeat("难绷")
+    for index in range(5):
+        decision = manager.observe_active(
+            event(user_key="u1", text="难绷", repeat_payload=payload),
+            config=config,
+            now=float(index),
+            roll=1.0,
+        )
+    assert decision.action is Action.NONE
+
+
+def test_repeat_key_includes_mentions(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    for index, target in enumerate(("u9", "u8", "u7")):
+        decision = manager.observe_active(
+            event(
+                user_key=f"u{index}",
+                text="难绷",
+                repeat_payload=_repeat("难绷", (target,)),
+            ),
+            config=config,
+            now=float(index),
+            roll=1.0,
+        )
+    # 每句 @ 的人不同，不能算同一句
+    assert decision.action is Action.NONE
+
+
+def test_repeat_same_burst_deduped(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    payload = _repeat("难绷")
+    for index in range(3):
+        manager.observe_active(
+            event(user_key=f"u{index}", text="难绷", repeat_payload=payload),
+            config=config,
+            now=float(index),
+            roll=1.0,
+        )
+    # 复读后再来一个不同用户，同一波不再复读
+    decision = manager.observe_active(
+        event(user_key="u3", text="难绷", repeat_payload=payload),
+        config=config,
+        now=10.0,
+        roll=1.0,
+    )
+    assert decision.action is Action.NONE
+
+
+def test_repeat_counts_toward_daily_not_cooldown(manager: PresenceManager) -> None:
+    manager.note_repeat("g1", now=0.0)
+    assert manager.daily_count("g1", now=0.0) == 1
+    assert manager._groups["g1"].last_spoke_at == 0.0
+
+
+def test_repeat_disabled(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_repeat_enabled=False))
+    payload = _repeat("难绷")
+    for index in range(3):
+        decision = manager.observe_active(
+            event(user_key=f"u{index}", text="难绷", repeat_payload=payload),
+            config=config,
+            now=float(index),
+            roll=1.0,
+        )
+    assert decision.action is Action.NONE
+
+
+# ── 失败熔断 ───────────────────────────────────────────────────────
+
+
+def test_no_permission_disables_proactive(manager: PresenceManager) -> None:
+    manager.note_failure("g1", code=40034105, now=0.0)
+    config = config_from(cfg(group_presence_rate=1))
+    decision = manager.observe_active(event(), config=config, now=0.0, roll=0.0)
+    assert decision.reason == "proactive_disabled"
+
+
+def test_network_failure_twice_disables(manager: PresenceManager) -> None:
+    manager.note_failure("g1", code=0, now=0.0)
+    manager.note_failure("g1", code=0, now=1.0)
+    config = config_from(cfg(group_presence_rate=1))
+    decision = manager.observe_active(event(), config=config, now=2.0, roll=0.0)
+    assert decision.reason == "proactive_disabled"
+
+
+def test_rate_limited_short_cooldown(manager: PresenceManager) -> None:
+    manager.note_failure("g1", code=429, now=0.0)
+    config = config_from(cfg(group_presence_rate=1))
+    assert (
+        manager.observe_active(event(), config=config, now=30.0, roll=0.0).reason
+        == "cooldown"
+    )
+    assert (
+        manager.observe_active(event(), config=config, now=61.0, roll=0.0).action
+        is Action.WAKE
+    )
+
+
+# ── 被动窗口（回归）───────────────────────────────────────────────
+
+
+def test_passive_window_register_and_acquire() -> None:
+    passive_window.reset()
+    reply = object()
+    passive_window.register("g1", reply, now=0.0)
+    assert passive_window.acquire("g1", now=1.0) is reply
+    passive_window.mark_used("g1", now=1.0)
+    assert passive_window.acquire("g1", now=2.0) is None
+
+
+def test_passive_window_expires() -> None:
+    passive_window.reset()
+    passive_window.register("g1", object(), now=0.0)
+    assert passive_window.acquire("g1", now=301.0) is None
+
+
+def test_passive_window_unknown_group() -> None:
+    passive_window.reset()
+    assert passive_window.acquire("nope", now=0.0) is None
+
+
+# ── 编排层 ─────────────────────────────────────────────────────────
+
+
+@dataclass
+class Seg:
+    type: str
+    data: dict[str, object]
+
+
+class FakeReply:
+    max_parts = 4
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    async def text(self, content: str) -> None:
+        self.texts.append(content)
+
+    async def passive(self, content: str) -> None:
+        self.texts.append(content)
+
+    async def mention(self, _user_key: str, content: str) -> None:
+        self.texts.append(content)
+
+    async def image(self, _data: bytes, _name: str = "") -> None:
+        return None
+
+    async def finish(self) -> None:
+        return None
+
+
+def fake_event(
+    *segments: Seg, group_key: str = "g1", bot: bool = False
+) -> SimpleNamespace:
+    message = list(segments)
+    return SimpleNamespace(
+        group_openid=group_key,
+        author=SimpleNamespace(bot=bot),
+        get_message=lambda: message,
+    )
+
+
+def fake_incoming(
+    text: str = "在吗",
+    *,
+    images: list[MediaRef] | None = None,
+    message_id: str = "m1",
+    user_key: str = "u1",
+    group_key: str = "g1",
+) -> Incoming:
+    return Incoming(
+        user_key=user_key,
+        group_key=group_key,
+        display_name="小明",
+        text=text,
+        images=images or [],
+        message_id=message_id,
+        reply=FakeReply(),
+        caps=PlatformCaps(
+            can_see_all_group_messages=True,
+            can_send_image=True,
+            max_reply_parts=4,
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _clean_manager() -> None:
+    presence.manager.reset()
+    passive_window.reset()
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_speaks_with_active_message(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        await incoming.reply.text("在")
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "在吗"})),
+        config=cfg(group_presence_rate=1),
+        incoming=fake_incoming("在吗"),
+        now=0.0,
+        roll=0.0,
+        send_text=_collect(sent),
+    )
+    assert ok is True
+    assert sent == ["在"]
+    assert presence.manager.state_of("g1", now=0.0) is PresenceState.AWAKE
+
+
+def _collect(sink: list[str]):
+    async def send(content: str) -> None:
+        sink.append(content)
+
+    return send
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_repeat_preserves_mentions() -> None:
+    captured: list[RepeatPayload] = []
+
+    async def fake_send(payload: RepeatPayload) -> None:
+        captured.append(payload)
+
+    segments = [
+        Seg("mention_user", {"user_id": "u9"}),
+        Seg("text", {"text": " 难绷"}),
+    ]
+    config = cfg()
+    for index in range(3):
+        ok = await autotrigger.maybe_autotrigger(
+            object(),
+            fake_event(*segments),
+            config=config,
+            incoming=fake_incoming(
+                "难绷", user_key=f"u{index}", message_id=f"m{index}"
+            ),
+            now=float(index),
+            roll=1.0,
+            send_repeat=fake_send,
+        )
+    assert ok is True
+    assert captured and captured[0].parts == (
+        ("mention", "u9"),
+        ("text", " 难绷"),
+    )
+    assert captured[0].mentions == ("u9",)
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_failure_disables_group(monkeypatch) -> None:
+    class BoomError(Exception):
+        code = 40034105
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        raise BoomError
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "在吗"})),
+        config=cfg(group_presence_rate=1),
+        incoming=fake_incoming("在吗"),
+        now=0.0,
+        roll=0.0,
+        send_text=_collect([]),
+    )
+    assert ok is False
+    assert presence.manager._groups["g1"].active_ok is False
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_skips_bot_and_missing_incoming() -> None:
+    assert (
+        await autotrigger.maybe_autotrigger(
+            object(),
+            fake_event(bot=True),
+            config=cfg(),
+            incoming=fake_incoming(),
+            now=0.0,
+        )
+        is False
+    )
+    assert (
+        await autotrigger.maybe_autotrigger(
+            object(), fake_event(), config=cfg(), incoming=None, now=0.0
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_swallows_exceptions(monkeypatch) -> None:
+    class DbError(Exception):
+        pass
+
+    def boom(_settings):
+        raise DbError
+
+    monkeypatch.setattr(presence, "config_from", boom)
+    ok = await autotrigger.maybe_autotrigger(
+        object(), fake_event(), config=cfg(), incoming=fake_incoming(), now=0.0
+    )
+    assert ok is False

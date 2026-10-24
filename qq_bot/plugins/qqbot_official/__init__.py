@@ -7,6 +7,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from nonebot import get_driver, get_plugin_config, on_message, on_notice
 from nonebot.adapters.qq import (
@@ -21,8 +22,8 @@ from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
 from qq_bot.ai.model_registry import get_registry
-from qq_bot.chat import passive_window
-from qq_bot.chat.autotrigger import maybe_autotrigger, record_bot_message
+from qq_bot.chat import passive_window, presence
+from qq_bot.chat.autotrigger import maybe_autotrigger
 from qq_bot.chat.turn import run_turn
 from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.platform.ports import Incoming
@@ -120,27 +121,36 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
         return
 
     config = get_plugin_config(AiChatConfig)
-    # 登记被动窗口：@ 这一轮按最保守口径记账（假设 4 段已用满），窗口里只留
-    # 1 次给自动接话。真实剩余额度以平台为准：宁可少说，也不能超发被拒。
     if incoming.group_key:
+        # 登记被动窗口：@ 这一轮按最保守口径记账（假设 4 段已用满）。
         passive_window.register(
             incoming.group_key,
             incoming.reply,
-            window_seconds=float(config.group_autotrigger_window_seconds),
+            window_seconds=passive_window.WINDOW_SECONDS,
         )
+        # 静默词 / 静默解除：@ 路径不参与 0-1，但要把状态机喂饱。
+        decision = presence.manager.observe_passive(
+            group_key=incoming.group_key,
+            user_key=incoming.user_key,
+            text=incoming.text,
+            message_id=incoming.message_id,
+            config=presence.config_from(config),
+            now=time.monotonic(),
+        )
+        if decision.action is presence.Action.MUTE_ACK:
+            # 只回执，不再走完整 turn：用户要的是「闭嘴」，不是解释。
+            await incoming.reply.passive(decision.ack or "好")
+            return
     try:
-        final_content = await asyncio.wait_for(
-            run_turn(incoming, config=config), timeout=120
-        )
+        await asyncio.wait_for(run_turn(incoming, config=config), timeout=120)
     except asyncio.TimeoutError:
         logger.exception("QQ turn timeout after 120s")
     except Exception:
         logger.exception("QQ 官方路径处理失败")
         await bot.send(event, MessageSegment.text("我这边卡了一下 稍后再试"))
     else:
-        # 记下 bot 上一句：自动接话靠「实词重叠」判断是不是同一个话题
         if incoming.group_key:
-            record_bot_message(incoming.group_key, final_content or "")
+            presence.manager.note_passive(incoming.group_key, now=time.monotonic())
 
 
 async def _record_full_message(

@@ -29,15 +29,26 @@ class AiChatConfig(BaseModel):
     reply_split_max_chars: int = 30  # 单条超过该字数就按标点/空格切条
     reply_typing_delay: bool = True  # 分段之间按字数模拟打字停顿
 
-    # ── 群聊自动接话（L1：蹭 @ 触发的被动回复窗口，不耗主动消息额度）──
-    group_autotrigger: bool = True  # 总开关；关掉后 full_matcher 只落库不接话
-    group_autotrigger_daily_cap: int = 6  # 每群每天最多自动接几句
-    group_autotrigger_cooldown_sec: int = 90  # 同群两次自动接话的最小间隔
-    group_autotrigger_probability: float = 0.6  # 过阈值后再摇一次概率
-    group_autotrigger_min_score: int = 4  # 打分阈值（见 qq_bot/chat/activation.py）
-    group_autotrigger_window_seconds: int = 300  # 平台被动窗口：5 分钟
-    group_autotrigger_names: str = "大肥鱼,肥鱼,鱼鱼"  # 逗号分隔：文本点到名字 +3
-    group_autotrigger_hint: str = "（这没人在叫你，你只是顺嘴插一句）"
+    # ── 群聊存在感（P1：0-1 抽奖 + 10 分钟窗口 + 静默 + 复读）──
+    # 设计见 docs/spec/group-presence.md；决策在 qq_bot/chat/presence.py。
+    group_presence_enabled: bool = True  # 总开关；关掉后只落库，不接话
+    group_presence_rate: float = 0.2  # 每条可接消息的抽奖概率（0-1）
+    group_presence_window_sec: int = 600  # 中奖后在场窗口：10 分钟
+    group_presence_rate_in_window: float = 2.0  # 窗口内倍率：p = rate x 本值
+    group_presence_reply_cooldown_sec: int = 15  # 窗口内两次接话的最小间隔
+    group_presence_wake_cooldown_sec: int = 300  # 窗口结束到可再抽奖的间隔
+    group_presence_daily_active: int = 120  # 每群每天主动消息上限（行为熔断）
+    group_presence_mute_sec: int = 1800  # 「闭嘴」静默时长：30 分钟
+    group_presence_mute_words: str = "闭嘴,别说了,安静"  # 逗号分隔，须 @bot
+    group_presence_mute_ack: str = "好"  # 静默回执；不要用反问句
+    group_presence_ignore_openids: str = ""  # 逗号分隔：这些人的消息不触发主动
+    group_presence_image_rate_mult: float = 0.5  # 纯图片抽奖折扣
+    group_presence_repeat_enabled: bool = True  # 复读机开关
+    group_presence_repeat_min_users: int = 3  # 至少几个不同用户重复才算
+    group_presence_repeat_window_sec: int = 90  # 重复计数窗口
+    group_presence_repeat_max_chars: int = 20  # 超过该字数不参与复读
+    # P2（关键词）预留：先读入，P1 不启用
+    group_presence_keywords: str = ""
 
     # ── WebSearch配置 ──
     Tavily_key: list[str] = []
