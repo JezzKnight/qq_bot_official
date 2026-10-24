@@ -3,7 +3,7 @@
 三层职责：
 
 1. ``split_for_reply`` —— 把模型输出切成"像 QQ 连发"的短消息：
-   空行优先（模型显式分段），单段过长再按 句末 → 逗号 → 空格 三级断点切，
+   换行优先（模型往往用单换行分段），单段过长再按 句末 → 逗号 → 空格 三级断点切，
    硬切时避开数字/英文单词内部（``500N``、``1612N``、链接）。
 2. ``typing_delay`` —— 按字数估算"打完这句话"要多久，作为下一条消息的停顿。
 3. ``send_reply_chunks`` —— 首条立即发（群聊带 @），其后每条前停顿。
@@ -44,7 +44,11 @@ def split_for_reply(
     max_chars: int = MAX_CHUNK_CHARS,
 ) -> list[str]:
     """把回复切成若干条消息；超过 ``max_parts`` 时把尾部合并，避免撞发送上限。"""
-    paragraphs = [p.strip() for p in (text or "").split("\n\n") if p.strip()]
+    paragraphs = [
+        p.strip()
+        for p in (text or "").replace("\r\n", "\n").split("\n")
+        if p.strip()
+    ]
     if not paragraphs:
         return [""]
     chunks = [piece for para in paragraphs for piece in _split_long(para, max_chars)]

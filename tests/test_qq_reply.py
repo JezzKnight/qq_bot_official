@@ -14,6 +14,18 @@ def test_short_reply_kept_as_is() -> None:
     assert split_for_reply("你好\n\n今天吃白饭") == ["你好", "今天吃白饭"]
 
 
+def test_single_newline_also_splits() -> None:
+    # 模型常用单换行分段：短句也要切成两条
+    assert split_for_reply("螶鋒嗰體獽彎欎\n打一遍我手都累了") == [
+        "螶鋒嗰體獽彎欎",
+        "打一遍我手都累了",
+    ]
+
+
+def test_crlf_splits_too() -> None:
+    assert split_for_reply("甲\r\n乙") == ["甲", "乙"]
+
+
 def test_empty_reply_falls_back_to_single_chunk() -> None:
     assert split_for_reply("   ") == [""]
 

@@ -46,7 +46,7 @@ _MEDIA_SEGMENTS = frozenset(
 
 
 class ActiveReply:
-    """一条主动消息的 ReplyTarget：不带 @、不发图、失败要能上报。
+    """一条主动消息的 ReplyTarget：不带 @、失败要能上报。
 
     ``max_parts = 1``：自动接话只说一条，避免一次刷出好几段主动消息。
     """
@@ -54,8 +54,13 @@ class ActiveReply:
     uses_proactive = True
     max_parts = 1
 
-    def __init__(self, send: Callable[[str], Awaitable[None]]) -> None:
+    def __init__(
+        self,
+        send: Callable[[str], Awaitable[None]],
+        send_image: Callable[[bytes, str], Awaitable[None]] | None = None,
+    ) -> None:
         self._send = send
+        self._send_image = send_image
 
     async def text(self, content: str) -> None:
         await self._send(content)
@@ -67,8 +72,9 @@ class ActiveReply:
         # 顺嘴接话不 @ 人
         await self._send(content)
 
-    async def image(self, _data: bytes, _name: str = "") -> None:
-        return None
+    async def image(self, data: bytes, name: str = "") -> None:
+        if self._send_image is not None:
+            await self._send_image(data, name)
 
     async def finish(self) -> None:
         return None
@@ -242,7 +248,11 @@ async def _speak(  # noqa: PLR0913
         if dispatch is not None:
             await asyncio.wait_for(dispatch(bot, event), timeout=TURN_TIMEOUT_SEC)
         else:
-            auto_incoming = replace(incoming, text=text, reply=ActiveReply(sender))
+            auto_incoming = replace(
+                incoming,
+                text=text,
+                reply=ActiveReply(sender, _proactive_image(bot, event)),
+            )
             await asyncio.wait_for(
                 run_turn(auto_incoming, config=config), timeout=TURN_TIMEOUT_SEC
             )
@@ -458,6 +468,35 @@ def _repeat_payload(
     if not presence.is_acceptable(candidate):
         return None
     return RepeatPayload(tuple(parts))
+
+
+def _proactive_image(
+    bot: Any, event: Any
+) -> Callable[[bytes, str], Awaitable[None]]:
+    """自动接话时的表情包：主动消息优先，发不出去再退回被动（不烧额度）。"""
+
+    async def send(data: bytes, name: str = "") -> None:
+        from nonebot.adapters.qq import MessageSegment
+        from nonebot.adapters.qq.exception import ActionFailed
+
+        from qq_bot.platform.qqbot.reply import CONTENT_VIOLATION_CODE
+
+        seg = MessageSegment.file_image(data, name or "image.png")
+        try:
+            await bot.send_to_group(
+                group_openid=event.group_openid,
+                message=seg,
+            )
+        except ActionFailed as exc:
+            if exc.code == CONTENT_VIOLATION_CODE:  # 内容违规，换通道也一样被拒
+                raise
+            logger.warning("presence image 主动发送失败，回退被动", exc_info=True)
+            await bot.send(event, seg)
+        except Exception:
+            logger.warning("presence image 主动发送失败，回退被动", exc_info=True)
+            await bot.send(event, seg)
+
+    return send
 
 
 def _proactive_text(bot: Any, event: Any) -> Callable[[str], Awaitable[None]]:
