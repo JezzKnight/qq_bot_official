@@ -18,8 +18,8 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from qq_bot.chat import conversation, presence, relevance
 from qq_bot.chat import judge as judge_mod
-from qq_bot.chat import presence, relevance
 from qq_bot.chat.presence import (
     Action,
     Decision,
@@ -264,6 +264,7 @@ async def _speak(  # noqa: PLR0913
     """跑一轮真实 turn，把结果记为一条主动消息。"""
     group_key = decision.group_key
     sender = send_text or _proactive_text(bot, event)
+    body = ""
     try:
         if dispatch is not None:
             await asyncio.wait_for(dispatch(bot, event), timeout=TURN_TIMEOUT_SEC)
@@ -273,7 +274,7 @@ async def _speak(  # noqa: PLR0913
                 hint=hint,
                 reply=ActiveReply(sender, _proactive_image(bot, event)),
             )
-            await asyncio.wait_for(
+            body = await asyncio.wait_for(
                 run_turn(auto_incoming, config=config), timeout=TURN_TIMEOUT_SEC
             )
     except Exception as exc:  # noqa: BLE001 —— 自动接话失败只记账，不打扰用户
@@ -284,6 +285,7 @@ async def _speak(  # noqa: PLR0913
         presence.manager.note_failure(group_key, code=code, now=clock)
         return False
     presence.manager.note_spoken(group_key, now=clock)
+    conversation.manager.note_bot(group_key, str(body or ""), at=clock)
     await _log_probe(bot, group_key, clock)
     logger.info(
         "presence speak group=%s daily=%s action=%s",
@@ -322,6 +324,7 @@ async def _about(  # noqa: PLR0913 —— 过渡句需要这些上下文
         presence.manager.note_failure(group_key, code=code, now=clock)
         return False
     presence.manager.note_spoken(group_key, now=clock)
+    conversation.manager.note_bot(group_key, text, at=clock)
     logger.info(
         "presence transition group=%s keyword=%s text=%r daily=%s",
         group_key,
@@ -495,6 +498,7 @@ async def _repeat(  # noqa: PLR0913, PLR0917
         )
         return False
     presence.manager.note_repeat(decision.group_key, now=clock)
+    conversation.manager.note_bot(decision.group_key, payload.text, at=clock)
     logger.info(
         "presence repeat sent group=%s text=%r mentions=%s daily=%s/%s",
         decision.group_key,

@@ -14,6 +14,7 @@ class SystemPromptParts:
     sticker: str
     summary: str
     speaker: str
+    state: str
     memory: str
     time: str
 
@@ -28,6 +29,7 @@ def build_system_prompt(parts: SystemPromptParts) -> str:
             parts.sticker,
             parts.summary,
             parts.speaker,
+            parts.state,
             parts.memory,
             parts.time,
         )

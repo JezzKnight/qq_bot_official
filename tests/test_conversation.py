@@ -1,0 +1,253 @@
+"""群聊会话图：账本计数、指向解析、[群聊状态] 渲染。"""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from qq_bot.chat import conversation
+
+TIMES = "\u00d7"
+
+from qq_bot.chat.conversation import (
+    Addressee,
+    ConversationManager,
+    GroupConversation,
+    MessageNode,
+    normalize_text,
+    parse_bot_names,
+    topic_tokens,
+)
+
+
+def node(  # noqa: PLR0913
+    mid: str,
+    sender: str,
+    text: str,
+    *,
+    at: float = 100.0,
+    name: str = "",
+    mentions: tuple[str, ...] = (),
+    mention_bot: bool = False,
+) -> MessageNode:
+    return MessageNode(
+        mid=mid,
+        sender_id=sender,
+        sender_name=name or sender,
+        text=text,
+        at=at,
+        mentions=mentions,
+        mention_bot=mention_bot,
+        tokens=topic_tokens(text),
+    )
+
+
+def test_ledger_counts_per_user() -> None:
+    conv = GroupConversation()
+    for index in range(3):
+        conv.observe(node(f"m{index}", "u1", "fw", at=100.0 + index))
+
+    assert conv.ledger.count_of("u1", "fw") == 3
+    assert conv.ledger.count_of("u1") == 3
+
+
+def test_ledger_does_not_merge_users() -> None:
+    conv = GroupConversation()
+    conv.observe(node("m1", "a", "fw", at=100.0))
+    conv.observe(node("m2", "a", "fw", at=101.0))
+    conv.observe(node("m3", "b", "废物", at=102.0))
+
+    assert conv.ledger.count_of("a", "fw") == 2
+    assert conv.ledger.count_of("b", "废物") == 1
+    assert conv.ledger.count_of("b", "fw") == 0
+
+
+def test_normalize_merges_width_and_case() -> None:
+    conv = GroupConversation()
+    conv.observe(node("m1", "u1", "FW", at=100.0))
+    conv.observe(node("m2", "u1", "\uff46\uff57", at=101.0))
+
+    assert normalize_text("\uff26 \uff37") == "f w"
+    assert conv.ledger.count_of("u1", "fw") == 2
+
+
+def test_mention_bot_wins() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    conv.observe(
+        node("m1", "u1", "fw", mentions=("bot",), mention_bot=True)
+    )
+
+    addressee = conv.resolve(conv.nodes[-1])
+    assert addressee.target == "bot"
+    assert addressee.score == 1.0
+    assert addressee.evidence == ("@bot",)
+
+
+def test_name_call_points_to_bot() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    conv.observe(node("m1", "u1", "大肥鱼 在吗"))
+
+    addressee = conv.resolve(conv.nodes[-1])
+    assert addressee.target == "bot"
+    assert addressee.score == 0.9
+
+
+def test_second_person_after_bot() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    conv.observe(node("m1", "u1", "今天好热", at=100.0))
+    conv.note_bot("确实", at=100.5)
+    conv.observe(node("m2", "u2", "你觉得呢", at=101.0))
+
+    addressee = conv.resolve(conv.nodes[-1])
+    assert addressee.target == "bot"
+    assert addressee.score == 0.75
+
+
+def test_mention_other_points_to_user() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    conv.observe(node("m1", "u1", "你昨天那把太菜了", mentions=("u2",)))
+
+    addressee = conv.resolve(conv.nodes[-1])
+    assert addressee.target == "u2"
+    assert addressee.score == 1.0
+
+
+def test_alternating_pair() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    conv.observe(node("m1", "a", "在吗", at=100.0))
+    conv.observe(node("m2", "b", "在", at=101.0))
+    conv.observe(node("m3", "a", "打游戏不", at=102.0))
+    conv.observe(node("m4", "b", "来", at=103.0))
+
+    addressee = conv.resolve(conv.nodes[-1])
+    assert addressee.target == "a"
+    assert addressee.score == 0.8
+
+
+def test_no_signal_is_group() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    conv.observe(node("m1", "u1", "今天天气不错"))
+
+    addressee = conv.resolve(conv.nodes[-1])
+    assert addressee.target == "group"
+    assert addressee.score == 0.2
+
+
+def test_render_caps_speakers_and_phrases() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    for user in range(6):
+        for phrase in range(4):
+            conv.observe(
+                node(
+                    f"m{user}-{phrase}",
+                    f"u{user}",
+                    f"词{phrase}",
+                    at=100.0 + user * 10 + phrase,
+                    name=f"人{user}",
+                )
+            )
+
+    text = conv.render(
+        conv.nodes[-1],
+        Addressee("group", 0.2, ("无明确指向",)),
+        now=200.0,
+        max_speakers=5,
+        max_phrases=3,
+    )
+
+    assert "人0" not in text
+    assert text.count(TIMES) == 20
+
+
+def test_render_respects_token_budget() -> None:
+    conv = GroupConversation()
+    conv.bot_id = "bot"
+    conv.observe(node("m1", "u1", "一个很长很长很长的重复句子", at=100.0, name="小明"))
+
+    text = conv.render(
+        conv.nodes[-1],
+        Addressee("bot", 1.0, ("@bot",)),
+        now=101.0,
+        block_tokens=20,
+    )
+
+    assert "（" not in text
+    assert f"小明{TIMES}1" in text
+
+
+def test_empty_conversation_is_safe() -> None:
+    manager = ConversationManager()
+    manager.note_bot("missing", "没人", at=time.monotonic())
+
+    assert manager.block("missing") == ""
+    assert manager.addressee("missing") is None
+
+
+def test_manager_evicts_oldest_group() -> None:
+    manager = ConversationManager(max_groups=2)
+    for group in ("g1", "g2", "g3"):
+        manager.observe(
+            group_key=group,
+            user_key="u1",
+            name="小明",
+            text="hi",
+            message_id=f"m-{group}",
+            at=100.0,
+        )
+
+    assert manager.block("g1") == ""
+    assert manager.block("g3") != ""
+
+
+def test_replay_insult_scene() -> None:
+    manager = ConversationManager()
+    manager.bind_bot("bot")
+    script = [
+        ("m1", "a", "隐身人", "fw"),
+        ("m2", "a", "隐身人", "fw"),
+        ("m3", "a", "隐身人", "fw"),
+        ("m4", "b", "AMelax", "废物"),
+        ("m5", "b", "AMelax", "废物"),
+    ]
+    for index, (mid, uid, name, text) in enumerate(script):
+        manager.observe(
+            group_key="g1",
+            user_key=uid,
+            name=name,
+            text=text,
+            message_id=mid,
+            mentions=("bot",),
+            mention_bot=True,
+            at=100.0 + index,
+        )
+
+    assert manager.count_of("g1", "a", "fw") == 3
+    assert manager.count_of("g1", "b", "废物") == 2
+
+    text = manager.block("g1", now=120.0)
+    assert f"隐身人{TIMES}3" in text
+    assert f"fw{TIMES}3" in text
+    assert f"AMelax{TIMES}2" in text
+    assert "本条指向：bot" in text
+
+
+def test_parse_bot_names() -> None:
+    assert parse_bot_names("") == conversation.DEFAULT_BOT_NAMES
+    assert parse_bot_names("大肥鱼, 鱼鱼") == ("大肥鱼", "鱼鱼")
+
+
+def test_topic_tokens_drops_punctuation() -> None:
+    tokens = topic_tokens("大肥鱼，在吗？")
+    assert "大肥" in tokens
+    assert "，" not in tokens
+
+    with pytest.raises(AttributeError):
+        tokens.add("x")

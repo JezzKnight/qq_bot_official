@@ -22,7 +22,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
 from qq_bot.ai.model_registry import get_registry
-from qq_bot.chat import passive_window, presence
+from qq_bot.chat import conversation, passive_window, presence
 from qq_bot.chat.autotrigger import maybe_autotrigger
 from qq_bot.chat.turn import run_turn
 from qq_bot.memory.memory_config import get_memory_config
@@ -114,6 +114,51 @@ group_matcher = on_message(rule=Rule(_is_group_at), priority=10, block=True)
 c2c_matcher = on_message(rule=Rule(_is_c2c), priority=10, block=True)
 
 
+def _event_mentions(
+    event: QQMessageEvent, bot_id: str
+) -> tuple[tuple[str, ...], bool]:
+    """解析出 @ 的 openid 序列与是否 @ 了 bot。"""
+    mentions: list[str] = []
+    mention_bot = False
+    try:
+        segments = event.get_message()
+    except Exception:  # noqa: BLE001 —— 解析失败按没有 @ 处理
+        return (), False
+    for segment in segments:
+        if segment.type not in {"mention_user", "mention", "at"}:
+            continue
+        data = segment.data or {}
+        uid = str(data.get("user_id") or data.get("qq") or "")
+        if not uid:
+            continue
+        mentions.append(uid)
+        if uid == bot_id:
+            mention_bot = True
+    return tuple(mentions), mention_bot
+
+
+def _observe_conversation(
+    bot: Bot, event: QQMessageEvent, incoming: Incoming, config: AiChatConfig
+) -> None:
+    """把群消息喂给会话图；关掉开关时什么都不做。"""
+    if not incoming.group_key or not config.group_conversation_enabled:
+        return
+    bot_id = str(getattr(bot, "self_id", "") or "")
+    if bot_id:
+        conversation.manager.bind_bot(bot_id)
+    mentions, mention_bot = _event_mentions(event, bot_id)
+    conversation.manager.observe(
+        group_key=incoming.group_key,
+        user_key=incoming.user_key,
+        name=incoming.display_name or "群成员",
+        text=incoming.text,
+        message_id=incoming.message_id,
+        mentions=mentions,
+        mention_bot=mention_bot,
+        at=time.monotonic(),
+    )
+
+
 async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
     incoming = qq_from_event(event, reply=QQReply(bot, event))
     if not incoming.text and not incoming.images:
@@ -122,6 +167,7 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
 
     config = get_plugin_config(AiChatConfig)
     if incoming.group_key:
+        _observe_conversation(bot, event, incoming, config)
         # 登记被动窗口：@ 这一轮按最保守口径记账（假设 4 段已用满）。
         passive_window.register(
             incoming.group_key,
@@ -142,7 +188,7 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
             await incoming.reply.passive(decision.ack or "好")
             return
     try:
-        await asyncio.wait_for(run_turn(incoming, config=config), timeout=120)
+        body = await asyncio.wait_for(run_turn(incoming, config=config), timeout=120)
     except asyncio.TimeoutError:
         logger.exception("QQ turn timeout after 120s")
     except Exception:
@@ -151,6 +197,9 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
     else:
         if incoming.group_key:
             presence.manager.note_passive(incoming.group_key, now=time.monotonic())
+            conversation.manager.note_bot(
+                incoming.group_key, body or "", at=time.monotonic()
+            )
 
 
 async def _record_full_message(
@@ -207,6 +256,7 @@ if _FULL_GROUP:
     async def handle_full_message(bot: Bot, event: QQMessageEvent) -> None:
         config = get_plugin_config(AiChatConfig)
         incoming = qq_from_event(event, reply=QQReply(bot, event))
+        _observe_conversation(bot, event, incoming, config)
         await _record_full_message(bot, event, incoming=incoming)
         if config.group_presence_enabled:
             await maybe_autotrigger(bot, event, config=config, incoming=incoming)

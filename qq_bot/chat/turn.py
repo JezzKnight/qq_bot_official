@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 from prompts.service import prompt_service
 from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
+from qq_bot.chat.conversation import manager as conversation_manager
+from qq_bot.chat.conversation import parse_bot_names
 from qq_bot.chat.persist import persist_turn, persist_user
 from qq_bot.chat.prompt import SystemPromptParts, build_system_prompt
 from qq_bot.chat.session_lock import group_session_key, session_lock
@@ -208,6 +210,17 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
             except Exception as exc:  # noqa: BLE001 —— 注入失败只降级
                 logger.warning("私聊记忆注入失败，降级为不注入: %s", type(exc).__name__)
 
+    state_block = ""
+    if is_group and getattr(config, "group_conversation_enabled", False):
+        state_block = conversation_manager.block(
+            gid,
+            bot_names=parse_bot_names(config.group_presence_keywords),
+            window_sec=config.group_conversation_window_sec,
+            max_speakers=config.group_conversation_max_speakers,
+            max_phrases=config.group_conversation_max_phrases,
+            block_tokens=config.group_conversation_block_tokens,
+        )
+
     sticker_catalog = catalog_text() or ""
     now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y年%m月%d日 %H:%M:%S")
     final_prompt = build_system_prompt(
@@ -224,6 +237,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 f'当前发言人: uid="{uid}", name="{sender_name}"'
                 + (f"\n{incoming.hint}" if incoming.hint else "")
             ),
+            state=state_block,
             memory=(
                 f"以下是本轮对话动态注入的长期记忆：\n{memory_prompt}"
                 if memory_prompt

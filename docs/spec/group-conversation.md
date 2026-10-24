@@ -1,0 +1,275 @@
+# 群聊会话图（GroupConversation）与指向解析 · 设计规格
+
+| 项 | 内容 |
+|---|---|
+| 版本 | v2（草案） |
+| 日期 | 2026-10-25 |
+| 状态 | P1 已实现（全量 266 passed） |
+| 前置 | [`group-presence.md`](group-presence.md) v1.14（状态机 / 窗口 / judge） |
+| 关联 | `qq_bot/chat/presence.py`、`qq_bot/chat/autotrigger.py`、`qq_bot/chat/turn.py` |
+
+## 1. 背景与问题
+
+真实记录（测试群，bot 名「雷霆大肥鱼」）：
+
+```
+隐身人：@雷霆大肥鱼 fw
+隐身人：@雷霆大肥鱼 fw
+隐身人：@雷霆大肥鱼 fw
+AMelax：@雷霆大肥鱼 废物
+AMelax：@雷霆大肥鱼 废物
+```
+
+bot 的回复把两个人的次数**合并**成「第四遍/第五遍」；被「你分得清谁是谁不」质疑后，又说「我以为重复是另一个人，是我笨」，越解释越乱。
+
+同一场景用本仓库真实 `run_turn` 回放，结论一致：
+
+- **逐条消息的发送者标签是准的**（模型能看到每条消息的 name）；
+- **跨消息聚合计数是错的**（3 次说成 2 次）；
+- **被质疑时会自我推翻**（模型把「重复」解释成「另一个人」，而不是查证）。
+
+根因不在 prompt 措辞，而在三件事被交给了语言模型：
+
+1. **聚合**：上下文是平铺文本，模型不擅长跨多轮计数、按说话人归并；
+2. **指向**：「这条在跟谁说话」需要 @ 关系、引用关系、上一句是谁说的——这些是硬事实，现在让模型猜；
+3. **稳定性**：prompt 规则在用户质疑下会被「顺从」覆盖，没有代码层的事实兜底。
+
+结论：**prompt 管措辞，归属和指向必须由代码算好再喂给模型。**
+
+## 2. 目标与非目标
+
+### 目标（P1）
+
+- 每群维护一份**会话图**：消息、发送者、@/引用关系、按人聚合的发言账本。
+- 代码解析**当前消息指向谁**（bot / 某个用户 / 群里），输出结构化结果。
+- 把可信的**归属事实**以一行 `[群聊状态]` 注入 prompt，所有群聊回复都带。
+- 不加依赖、不改数据库、不改现有回复判定。
+
+### 非目标（P1）
+
+- 不做影子模式、不做参与策略接管（P2 再做）。
+- 不做针对「计数/辱骂」场景的专用分支（该场景只是举例，不是高频需求）。
+- 不做跨群用户画像、不做持久化新表（重启重建放 P3）。
+
+## 3. 总体架构
+
+```
+每条群消息（@ / 非@ / 关键词）
+        │
+        ▼
+┌─────────────────────────────────────────────┐
+│ GroupConversation（每群一份，内存）          │
+│                                             │
+│  MessageRing  最近 30 条 MessageNode        │
+│  SpeakerLedger 按人聚合的发言账本           │
+│  MentionGraph  @ / 引用 关系                │
+│  TopicState    话题词 + 时间衰减            │
+└───────────────┬─────────────────────────────┘
+                │ 只读查询
+                ▼
+        ┌───────────────┐        ┌──────────────────┐
+        │ Addressee     │        │ [群聊状态] 注入   │
+        │ Resolver      │───────▶│ turn.py system   │
+        │ (在跟谁说话)   │        │ prompt 尾部       │
+        └───────────────┘        └──────────────────┘
+```
+
+P2 会在这里加一个 `ParticipationPolicy`（回复 / 过 / 睡）消费同一份图，P1 不实现。
+
+## 4. 数据模型
+
+### 4.1 MessageNode
+
+```python
+@dataclass(slots=True)
+class MessageNode:
+    mid: str                    # 平台 message_id
+    sender_id: str              # openid；bot 自己用 bot_id
+    sender_name: str            # 群名片/昵称，取不到用「有人」
+    text: str                   # 原文（不含引用前缀）
+    at: float                   # 时间戳（time.monotonic 或 wall clock，统一一种）
+    mentions: tuple[str, ...]   # @ 的 openid 序列（含 bot）
+    mention_bot: bool           # 是否 @ 了 bot
+    reply_to: str | None        # 引用/回复的消息 id（拿不到为 None）
+    tokens: frozenset[str]      # 归一化后的 2-gram，话题用
+```
+
+### 4.2 SpeakerStat / SpeakerLedger
+
+```python
+@dataclass(slots=True)
+class SpeakerStat:
+    user_id: str
+    name: str
+    count: int                   # 窗口内发言条数
+    texts: Counter[str]          # 归一化文本 → 次数（"fw" → 3）
+    last_at: float
+
+class SpeakerLedger:
+    def observe(self, node: MessageNode) -> None: ...
+    def stats(self, since_sec: float = 600.0, now: float | None = None) -> list[SpeakerStat]: ...
+    def count_of(self, user_id: str, text: str | None = None) -> int: ...
+    def who_said(self, text: str) -> list[tuple[str, int]]: ...
+```
+
+归一化：`strip` → 全角转半角 → 小写 → 连续空白压成一个。`fw` / `FW` / `ｆｗ` 视为同一个。
+
+### 4.3 Addressee
+
+```python
+@dataclass(frozen=True, slots=True)
+class Addressee:
+    target: str        # "bot" | openid | "group"
+    score: float       # 0~1
+    evidence: tuple[str, ...]   # 命中的信号，供日志与调试
+```
+
+## 5. AddresseeResolver：这条在跟谁说话
+
+输入：当前 `MessageNode`、最近若干 `MessageNode`、bot 的 openid、bot 名字列表。
+输出：最高分的 `Addressee`。
+
+### 5.1 信号与分值
+
+| # | 信号 | 指向 | 分值 | 备注 |
+|---|---|---|---|---|
+| 1 | 消息 @ 了 bot | bot | 1.00 | `mention_bot=True` |
+| 2 | 引用的消息发送者是 bot | bot | 0.95 | 拿不到引用目标时跳过 |
+| 3 | 文本含 bot 名字且 `relevance.fast_kind == CALL` | bot | 0.90 | 复用 `qq_bot/chat/relevance.py` |
+| 4 | 含「你 / 你们」且上一句发送者是 bot | bot | 0.75 | 代词指向 |
+| 5 | 紧接 bot 发言后的第一句是疑问句 | bot | 0.60 | 疑问句式：吗/呢/？/吗？ |
+| 6 | 消息 @ 了某个用户（非 bot） | 该用户 | 1.00 | 同时 @bot 时 bot 优先 |
+| 7 | 最近 3 条是 A↔B 交替，当前仍是 A | B | 0.80 | 双人对话识别 |
+| 8 | 以上都没有 | group | 0.20 | 默认 |
+
+规则：
+
+- 取最高分；同分按 1 > 2 > 3 > 6 > 4 > 5 > 7 > 8 的顺序取。
+- 信号 1 与 6 可同时成立（`@bot @某人 你看这个`）——此时按 1 指向 bot，evidence 记两条。
+- 名字匹配只认 `GROUP_PRESENCE_KEYWORDS`（当前 `大肥鱼`），避免把「雷霆」误当名字。
+
+### 5.2 边界
+
+- 纯图 / 纯表情：`text=""`，若同时 @bot 仍指向 bot；否则按 6/7/8。
+- 引用目标解析不到：跳过信号 2，不猜测。
+- 消息来自 bot 自己：不进入解析（`observe` 只记 ledger，不产生 Addressee）。
+
+## 6. 参与策略（P2 预留，P1 不实现）
+
+仅记录设计，避免以后再讨论一轮：
+
+| 条件 | 动作 |
+|---|---|
+| `target == "bot"` 且 `score >= 0.90` | REPLY，不抽奖 |
+| `target == 某用户` 且 `score >= 0.80` | PASS（命中名字 CALL 时 REPLY） |
+| `target == "group"` 且话题与 bot 相关 | 按 presence 的 `RATE` 抽奖 |
+| `target == "group"` 且话题无关 | PASS |
+| 连续 PASS 达到 `PASS_LIMIT` | SLEEP |
+
+## 7. Prompt 注入：`[群聊状态]`
+
+### 7.1 格式
+
+```
+[群聊状态] 最近 10 分钟：隐身人×3（fw×3）、AMelax×2（废物×2）;
+上一句是 小明 说的；本条指向：bot（依据：@bot）
+```
+
+- 最多列 5 个发言人，按发言数降序；
+- 每人最多列 3 个高频文本；
+- 没有可列内容时只输出指向与上一句；
+- 目标 ≤ 80 tokens，超出则截断人数与词数。
+
+### 7.2 注入位置
+
+`qq_bot/chat/turn.py` 组装 system prompt 时，在群聊摘要之后、当前消息之前插入一段；仅群聊注入，私聊不注入。
+
+### 7.3 配套规则（`prompts/chat/system.md`）
+
+只加一句通用规则，不做场景分支：
+
+> 涉及「谁说的 / 几次 / 几个人」时，以 `[群聊状态]` 为准，不要自己数。
+
+## 8. 接入点
+
+| 文件 | 改动 |
+|---|---|
+| `qq_bot/plugins/qqbot_official/__init__.py` | `_dispatch` 与非 @ 分支里对每条群消息调 `conversation.observe(...)` |
+| `qq_bot/chat/turn.py` | 群聊拼 prompt 时注入 `[群聊状态]` |
+| `qq_bot/services/config.py` | 新增 5 个 `group_conversation_*` 字段 |
+| 新文件 | `qq_bot/chat/conversation.py` |
+
+## 9. 容量与生命周期
+
+- 每群一个 `GroupConversation`，`MAX_GROUPS=512`，LRU 淘汰；
+- 消息环形缓冲 30 条；账本按 10 分钟窗口统计；
+- 进程内内存，不落库；重启后从空开始（P3 再从 `messages` 表重建）；
+- 纯本地计算，不增加模型调用。
+
+## 10. 参数表
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `GROUP_CONVERSATION_ENABLED` | `true` | 总开关 |
+| `GROUP_CONVERSATION_WINDOW_SEC` | `600` | 账本统计窗口 |
+| `GROUP_CONVERSATION_MAX_MESSAGES` | `30` | 环形缓冲条数 |
+| `GROUP_CONVERSATION_BLOCK_TOKENS` | `80` | `[群聊状态]` 预算 |
+| `GROUP_CONVERSATION_MAX_SPEAKERS` | `5` | 最多列几个发言人 |
+| `GROUP_CONVERSATION_MAX_PHRASES` | `3` | 每人最多列几个高频文本 |
+| `GROUP_CONVERSATION_TOPIC_WINDOW_SEC` | `600` | 话题词窗口 |
+
+## 11. 测试
+
+### 11.1 单元测试
+
+| # | 用例 |
+|---|---|
+| 1 | 同一用户 3 条 `fw` → `count_of(uid, "fw") == 3` |
+| 2 | 两个用户各说各的 → 计数不合并 |
+| 3 | 全角/大小写归一化后算同一条 |
+| 4 | @bot → `target == "bot"`，score 1.0 |
+| 5 | 文本「大肥鱼 在吗」→ CALL → bot |
+| 6 | 上一句是 bot，「你觉得呢」→ bot（0.75） |
+| 7 | @小明 → target 为小明，不是 bot |
+| 8 | A↔B 交替 3 条 → 当前 A 指向 B |
+| 9 | 无信号 → group 0.2 |
+| 10 | `[群聊状态]` 格式与截断（>5 人、>3 词） |
+| 11 | 空会话 / 只有 bot 消息时不抛异常 |
+| 12 | 超过 `MAX_GROUPS` 时最旧的群被淘汰 |
+
+### 11.2 回放测试
+
+用真实辱骂记录构造会话：
+
+- 断言隐身人 `fw` = 3、AMelax `废物` = 2，且不合并；
+- 断言第五条消息 `target == "bot"`；
+- 断言注入块包含两个名字与各自次数。
+
+## 12. 分阶段
+
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| P1 | `conversation.py`、`[群聊状态]` 注入、测试 | 已实现 |
+| P2 | `ParticipationPolicy` 接管明确场景；回复目标按 Addressee 决定 @ 谁 | 未开始 |
+| P3 | 重启重建、指标、按群调参 | 未开始 |
+
+## 13. 实现状态（P1）
+
+- `qq_bot/chat/conversation.py`：`MessageNode` / `SpeakerLedger` / `Addressee` /
+  `GroupConversation` / `ConversationManager`，含 `normalize_text`、
+  `topic_tokens`、`parse_bot_names`。
+- `qq_bot/chat/turn.py`：群聊 `SystemPromptParts.state` 注入 `[群聊状态]`。
+- `qq_bot/plugins/qqbot_official/__init__.py`：@ 与非 @ 两条路径都调
+  `conversation.manager.observe`；被动回复/主动接话成功后 `note_bot`。
+- `qq_bot/chat/prompt.py`：`SystemPromptParts` 新增 `state` 字段（排在
+  speaker 之后）。
+- `qq_bot/services/config.py` 与 `.env.example`：7 个 `GROUP_CONVERSATION_*` 参数。
+- `tests/test_conversation.py`：16 例（账本、归一化、8 条指向信号、渲染截断、
+  LRU、辱骂场景回放）。
+
+## 14. 风险与开放问题
+
+1. **引用目标可获取性**：nonebot-adapter-qq 的引用信息是否稳定带 message_id，待实测；拿不到就跳过信号 2。
+2. **名字匹配误伤**：「大肥鱼」出现在比喻/玩笑里会指向 bot；P1 先观察日志，P2 再决定是否加词性判断。
+3. **注入成本**：每轮 +50–80 tokens，按当前 8.4k prompt 约占 1%，可接受。
+4. **群名片更新**：改名后账本保留旧名，以 `last_at` 最新名字为准。
