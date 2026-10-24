@@ -174,3 +174,31 @@ async def test_clear_group_summaries(repo) -> None:
     )
     assert await repo.clear_group_summaries("G1") == 1
     assert await repo.count_summaries("G1") == 0
+
+
+async def test_clear_group_threads_and_memories(repo) -> None:
+    mine = await repo.ensure_thread("group_member", "G9", "U1")
+    other = await repo.ensure_thread("group_member", "G9", "U2")
+    keep = await repo.ensure_thread("group_member", "G10", "U1")
+    await repo.append(
+        thread_id=mine, group_id="G9", sender_id="U1", role="user", content="hi"
+    )
+    await repo.append(
+        thread_id=other, group_id="G9", sender_id="U2", role="user", content="yo"
+    )
+    await repo.append(
+        thread_id=keep, group_id="G10", sender_id="U1", role="user", content="hey"
+    )
+    await repo.upsert_memory(
+        scope_kind="group", scope_id="G9", key="k", content="v", mem_type="fact"
+    )
+    await repo.upsert_memory(
+        scope_kind="group", scope_id="G10", key="k", content="v", mem_type="fact"
+    )
+
+    assert await repo.clear_group_threads("G9") == (2, 2)
+    assert await repo.clear_group_memories("G9") == 1
+    assert await repo.history(mine, 10) == []
+    assert await repo.history(keep, 10)
+    assert await repo.list_memories(user_id="U1", group_id="G9") == []
+    assert await repo.list_memories(user_id="U1", group_id="G10")

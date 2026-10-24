@@ -29,7 +29,7 @@ HELP_TEXT = """能用这些指令
 /help 显示本帮助
 /reset 清除你自己的对话记忆
 /reset group 清空本群摘要（仅管理员）
-/reset all 清空本群摘要和你的记忆（仅管理员）
+/reset all 清空本群摘要和所有成员的记忆（仅管理员）
 /usage 查看今日 token 用量
 /model [模型名] 查看或切换模型
 /whoami 查看机器人记录的你的信息
@@ -98,12 +98,15 @@ async def _reset(
             return
         deleted_summary = await repo.clear_group_summaries(gid)
         if mode in ("all", "全部"):
-            thread_id = await repo.ensure_thread("group_member", gid, uid)
-            deleted_thread = await repo.clear_thread(thread_id)
-            await reply.passive(
-                f"已清空本群摘要（{deleted_summary} 条）和你的对话记忆"
-                f"（{deleted_thread} 条）"
+            threads, messages = await repo.clear_group_threads(gid)
+            memories = await repo.clear_group_memories(gid)
+            text = (
+                f"已清空本群摘要（{deleted_summary} 条）"
+                f"和所有成员的对话记忆（{threads} 个线程 / {messages} 条消息）"
             )
+            if memories:
+                text += f"，群公共记忆 {memories} 条"
+            await reply.passive(text)
         else:
             await reply.passive(f"已清空本群摘要（{deleted_summary} 条）")
         return

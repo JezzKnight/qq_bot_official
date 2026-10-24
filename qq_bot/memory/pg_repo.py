@@ -195,6 +195,31 @@ class PgRepository:
         )
         return int(result.split()[-1])
 
+    async def clear_group_threads(self, group_id: str) -> tuple[int, int]:
+        """删除本群所有成员线程（消息随线程级联删除），返回 (线程数, 消息数)。"""
+        row = await self.pool.fetchrow(
+            """
+            SELECT count(*) AS threads,
+                   (SELECT count(*) FROM messages WHERE group_id = $1) AS messages
+              FROM threads
+             WHERE kind = 'group_member' AND group_id = $1
+            """,
+            group_id,
+        )
+        await self.pool.execute(
+            "DELETE FROM threads WHERE kind = 'group_member' AND group_id = $1",
+            group_id,
+        )
+        return int(row["threads"]), int(row["messages"])
+
+    async def clear_group_memories(self, group_id: str) -> int:
+        """清空本群公共记忆（scope_kind='group'），返回删除条数。"""
+        result = await self.pool.execute(
+            "DELETE FROM memories WHERE scope_kind = 'group' AND scope_id = $1",
+            group_id,
+        )
+        return int(result.split()[-1])
+
     async def latest_summary(self, group_id: str) -> str | None:
         return await self.pool.fetchval(
             """
