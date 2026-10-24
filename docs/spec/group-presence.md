@@ -327,7 +327,7 @@ def on_group_message(msg, now):
 
 输入：
 
-- 人设片段：`prompts/chat/persona.md`、`social.md`、`style.md`（与主对话同一套）；
+- 人设片段：系统提示词 `prompts/chat/system.md`（v9 起合并成一个文件，与主对话同一套）；
 - 群摘要：`SystemPromptParts.summary`（由 `qq_bot/services/memory_compress.py` 产出）；
 - 最近群消息：`qq_bot/memory/assembler.py` 的 `group_window` 最近 `KEYWORD_CONTEXT_MESSAGES` 条（默认 15）；
 - 触发消息原文 + 发送者昵称；

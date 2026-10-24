@@ -1,13 +1,7 @@
-# chat 系统提示词链路 v6（QQ 专用，大肥鱼人设）
-# modules 的顺序就是拼接顺序；条目格式为 name.version。
-# - name 对应 chat/{name}.md
-# - version 是版本标记（改内容时手动递增）
-version: 8
+# chat 系统提示词链路 v9（QQ 专用，大肥鱼人设）
+# v9 起所有系统提示词模块合并进 chat/system.md，一个文件从头读到尾；
+# group.md（群聊身份规则）与 keyword_transition.md（过渡句模板）是独立调用，不在此链路内。
+# modules 的顺序就是拼接顺序；条目格式为 name.version，name 对应 chat/{name}.md。
+version: 9
 modules:
-  - persona.v1
-  - social.v1
-  - uncertainty.v9
-  - constraints.v1
-  - platform.v1
-  - multimodal.v1
-  - style.v3
+  - system.v1
