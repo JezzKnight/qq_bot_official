@@ -171,6 +171,24 @@ class GroupConversation:
     def history(self) -> list[MessageNode]:
         return list(self.nodes)
 
+    def topic_relevant(
+        self,
+        node: MessageNode,
+        *,
+        window: int = 5,
+        min_overlap: int = 2,
+    ) -> bool:
+        """本条消息的话题是否还围着 bot 或最近几轮在转。"""
+        if not node.tokens:
+            return False
+        if len(node.tokens & topic_tokens(self.last_bot_text)) >= min_overlap:
+            return True
+        recent = [item for item in list(self.nodes)[-window:] if item.mid != node.mid]
+        if not recent:
+            return False
+        group_tokens = frozenset().union(*(item.tokens for item in recent))
+        return len(node.tokens & group_tokens) >= min_overlap
+
     def prev_speaker(self, node: MessageNode) -> tuple[str, str]:
         """返回 (openid, 显示名)；bot 用 ``BOT_TARGET`` 表示。"""
         others = [item for item in self.nodes if item.mid != node.mid]
@@ -389,6 +407,20 @@ class ConversationManager:
         if conversation is None or not conversation.nodes:
             return None
         return conversation.resolve(conversation.nodes[-1], bot_names=bot_names)
+
+    def topic_relevant(
+        self,
+        group_key: str,
+        *,
+        window: int = 5,
+        min_overlap: int = 2,
+    ) -> bool:
+        conversation = self._groups.get(group_key)
+        if conversation is None or not conversation.nodes:
+            return False
+        return conversation.topic_relevant(
+            conversation.nodes[-1], window=window, min_overlap=min_overlap
+        )
 
     def block(  # noqa: PLR0913
         self,

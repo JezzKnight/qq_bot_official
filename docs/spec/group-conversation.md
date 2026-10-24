@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | v2（草案） |
+| 版本 | v3（P2 已落地） |
 | 日期 | 2026-10-25 |
-| 状态 | P1 已实现（全量 266 passed） |
+| 状态 | P1、P2 已实现（全量 276 passed） |
 | 前置 | [`group-presence.md`](group-presence.md) v1.14（状态机 / 窗口 / judge） |
 | 关联 | `qq_bot/chat/presence.py`、`qq_bot/chat/autotrigger.py`、`qq_bot/chat/turn.py` |
 
@@ -47,7 +47,7 @@ bot 的回复把两个人的次数**合并**成「第四遍/第五遍」；被�
 
 ### 非目标（P1）
 
-- 不做影子模式、不做参与策略接管（P2 再做）。
+- 不做影子模式；参与策略在 P2 直接接管（见 §6）。
 - 不做针对「计数/辱骂」场景的专用分支（该场景只是举例，不是高频需求）。
 - 不做跨群用户画像、不做持久化新表（重启重建放 P3）。
 
@@ -154,17 +154,28 @@ class Addressee:
 - 引用目标解析不到：跳过信号 2，不猜测。
 - 消息来自 bot 自己：不进入解析（`observe` 只记 ledger，不产生 Addressee）。
 
-## 6. 参与策略（P2 预留，P1 不实现）
+## 6. 参与策略（P2 已实现）
 
-仅记录设计，避免以后再讨论一轮：
+代码：`qq_bot/chat/participation.py`，在 judge 之前运行；只做「明确」判定，
+模糊情况一律交回 presence（judge 或 0-1 抽奖）。
 
-| 条件 | 动作 |
-|---|---|
-| `target == "bot"` 且 `score >= 0.90` | REPLY，不抽奖 |
-| `target == 某用户` 且 `score >= 0.80` | PASS（命中名字 CALL 时 REPLY） |
-| `target == "group"` 且话题与 bot 相关 | 按 presence 的 `RATE` 抽奖 |
-| `target == "group"` 且话题无关 | PASS |
-| 连续 PASS 达到 `PASS_LIMIT` | SLEEP |
+| 条件 | 动作 | reason |
+|---|---|---|
+| 没有会话上下文 | 交回 presence | `no_context` |
+| `target == "bot"` 且 `score >= 0.90` | REPLY：跳过抽奖强制接（仍受静默/日上限约束） | `target_bot` |
+| `target == "bot"` 且 `score < 0.90` | 交回 presence（交给 judge 判） | `bot_gray` |
+| `target == 某用户` | PASS：不插嘴；窗口内累计一次 PASS | `target_other_user` |
+| `target == "group"` 且话题相关 | 交回 presence（按 `RATE` 抽奖） | `topic_relevant` |
+| `target == "group"` 且话题无关 | PASS | `topic_irrelevant` |
+| 连续 PASS 达到 `PASS_LIMIT` | 关窗 SLEEP（复用 presence 的 `note_pass`） | `pass_limit` |
+
+补充约定：
+
+- 「你/你们」指向 bot 的 0.75 只作加分，不强制 REPLY（避免「你们」误伤）。
+- PASS 不重置 `REPLY_COOLDOWN`，只累计 `PASS_LIMIT`（用户 m02430 拍板）。
+- 强制接话时 `observe_active(force=True)` 跳过 `reply_cooldown` 与抽奖，
+  但不跳过静默、黑名单、日上限、重复消息。
+- `GROUP_PRESENCE_POLICY_ENABLED=false` 可整体退回 P3 行为（纯 judge/0-1）。
 
 ## 7. Prompt 注入：`[群聊状态]`
 
@@ -196,8 +207,8 @@ class Addressee:
 |---|---|
 | `qq_bot/plugins/qqbot_official/__init__.py` | `_dispatch` 与非 @ 分支里对每条群消息调 `conversation.observe(...)` |
 | `qq_bot/chat/turn.py` | 群聊拼 prompt 时注入 `[群聊状态]` |
-| `qq_bot/services/config.py` | 新增 5 个 `group_conversation_*` 字段 |
-| 新文件 | `qq_bot/chat/conversation.py` |
+| `qq_bot/services/config.py` | 7 个 `group_conversation_*` + `group_presence_policy_enabled` |
+| 新文件 | `qq_bot/chat/conversation.py`、`qq_bot/chat/participation.py` |
 
 ## 9. 容量与生命周期
 
@@ -217,6 +228,7 @@ class Addressee:
 | `GROUP_CONVERSATION_MAX_SPEAKERS` | `5` | 最多列几个发言人 |
 | `GROUP_CONVERSATION_MAX_PHRASES` | `3` | 每人最多列几个高频文本 |
 | `GROUP_CONVERSATION_TOPIC_WINDOW_SEC` | `600` | 话题词窗口 |
+| `GROUP_PRESENCE_POLICY_ENABLED` | `true` | 参与策略总开关（P2） |
 
 ## 11. 测试
 
@@ -236,6 +248,10 @@ class Addressee:
 | 10 | `[群聊状态]` 格式与截断（>5 人、>3 词） |
 | 11 | 空会话 / 只有 bot 消息时不抛异常 |
 | 12 | 超过 `MAX_GROUPS` 时最旧的群被淘汰 |
+| 13 | 策略：指向 bot 1.0 → REPLY；0.75 → 交回 presence |
+| 14 | 策略：指向某用户 → PASS；群里话题无关 → PASS |
+| 15 | 窗口内连续 PASS 达到上限 → 关窗（复用 `note_pass`） |
+| 16 | 强制接话：SLEEPING 也能唤醒，且跳过 `reply_cooldown` |
 
 ### 11.2 回放测试
 
@@ -250,10 +266,10 @@ class Addressee:
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P1 | `conversation.py`、`[群聊状态]` 注入、测试 | 已实现 |
-| P2 | `ParticipationPolicy` 接管明确场景；回复目标按 Addressee 决定 @ 谁 | 未开始 |
+| P2 | `ParticipationPolicy` 接管明确场景；回复目标按 Addressee 决定 @ 谁 | 已实现（策略部分；@ 选择未做） |
 | P3 | 重启重建、指标、按群调参 | 未开始 |
 
-## 13. 实现状态（P1）
+## 13. 实现状态（P1 + P2）
 
 - `qq_bot/chat/conversation.py`：`MessageNode` / `SpeakerLedger` / `Addressee` /
   `GroupConversation` / `ConversationManager`，含 `normalize_text`、
@@ -266,6 +282,12 @@ class Addressee:
 - `qq_bot/services/config.py` 与 `.env.example`：7 个 `GROUP_CONVERSATION_*` 参数。
 - `tests/test_conversation.py`：16 例（账本、归一化、8 条指向信号、渲染截断、
   LRU、辱骂场景回放）。
+- `qq_bot/chat/participation.py`：`PolicyDecision` + `decide()`；
+  接在 `autotrigger` 的 keyword 段之后、judge 之前。
+- `qq_bot/chat/presence.py`：`policy_enabled`、`observe_active(policy_pass=...)`、
+  `_decide_sleeping(force=...)` 的强制唤醒、force 跳过 `reply_cooldown`。
+- `tests/test_participation.py`：6 例；`tests/test_presence.py` 追加 4 例（策略 PASS、
+  强制唤醒、强制跳过冷却、@ 别人时不接）。
 
 ## 14. 风险与开放问题
 
@@ -273,3 +295,7 @@ class Addressee:
 2. **名字匹配误伤**：「大肥鱼」出现在比喻/玩笑里会指向 bot；P1 先观察日志，P2 再决定是否加词性判断。
 3. **注入成本**：每轮 +50–80 tokens，按当前 8.4k prompt 约占 1%，可接受。
 4. **群名片更新**：改名后账本保留旧名，以 `last_at` 最新名字为准。
+5. **策略阈值**：0.90 / 0.80 目前是经验值；先看 `presence policy` 日志的
+   target/score 分布，再决定是否调。
+6. **回复 @ 选择**：策略已算出 Addressee，但主动/被动回复还没按它选 @ 谁，
+   P2 收尾或 P3 再做。

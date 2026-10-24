@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
 import pytest
 
-from qq_bot.chat import autotrigger, passive_window, presence
+from qq_bot.chat import autotrigger, conversation, passive_window, presence
 from qq_bot.chat.presence import (
     Action,
     PresenceEvent,
@@ -550,6 +550,7 @@ def fake_incoming(
 @pytest.fixture(autouse=True)
 def _clean_manager() -> None:
     presence.manager.reset()
+    conversation.manager.reset()
     passive_window.reset()
 
 
@@ -1079,3 +1080,80 @@ def _fake_judge(action: str):
         return JudgeAction(action)
 
     return fake
+
+
+def test_policy_pass_accumulates_then_closes() -> None:
+    config = config_from(cfg(group_presence_rate=1.0, group_presence_pass_limit=2))
+    event = PresenceEvent(
+        group_key="g1", user_key="u1", text="在吗", message_id="m1"
+    )
+    first = presence.manager.observe_active(event, config=config, now=0.0, roll=0.0)
+    assert first.state is PresenceState.AWAKE
+
+    for index in range(2):
+        skip = presence.manager.observe_active(
+            replace(event, message_id=f"p{index}"),
+            config=config,
+            now=1.0 + index,
+            policy_pass=True,
+        )
+        assert skip.action is Action.NONE
+    assert presence.manager.state_of("g1", now=10.0) is PresenceState.SLEEPING
+
+
+def test_forced_reply_wakes_while_sleeping() -> None:
+    config = config_from(cfg(group_presence_rate=0.0))
+    event = PresenceEvent(
+        group_key="g2", user_key="u1", text="大肥鱼 在吗", message_id="m1"
+    )
+    decision = presence.manager.observe_active(
+        event, config=config, now=0.0, force=True
+    )
+    assert decision.action is Action.WAKE
+    assert decision.reason == "forced_wake"
+
+
+def test_forced_reply_bypasses_reply_cooldown() -> None:
+    config = config_from(cfg(group_presence_rate=1.0))
+    event = PresenceEvent(
+        group_key="g3", user_key="u1", text="在吗", message_id="m1"
+    )
+    presence.manager.observe_active(event, config=config, now=0.0, roll=0.0)
+    presence.manager.note_spoken("g3", now=1.0)
+    forced = presence.manager.observe_active(
+        replace(event, message_id="m2"),
+        config=config,
+        now=2.0,
+        force=True,
+    )
+    assert forced.action is Action.IN_WINDOW
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_skips_when_addressed_to_other_user(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        await incoming.reply.text("不该发")
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    conversation.manager.observe(
+        group_key="g1",
+        user_key="u1",
+        name="小明",
+        text="你昨天那把太菜了",
+        message_id="m1",
+        mentions=("u2",),
+        at=0.0,
+    )
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "你昨天那把太菜了"})),
+        config=cfg(group_presence_rate=1),
+        incoming=fake_incoming("你昨天那把太菜了"),
+        now=1.0,
+        roll=0.0,
+        send_text=_collect(sent),
+    )
+    assert ok is False
+    assert sent == []

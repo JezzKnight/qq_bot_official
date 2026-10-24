@@ -18,7 +18,7 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from qq_bot.chat import conversation, presence, relevance
+from qq_bot.chat import conversation, participation, presence, relevance
 from qq_bot.chat import judge as judge_mod
 from qq_bot.chat.presence import (
     Action,
@@ -125,7 +125,7 @@ async def maybe_autotrigger(  # noqa: PLR0913 —— 入口签名由插件固定
         return False
 
 
-async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0913
+async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
     bot: Any,
     event: Any,
     *,
@@ -204,9 +204,27 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0913
             return False
         keyword_awake = True
 
-    force = keyword_awake
+    policy = participation.PolicyDecision(
+        participation.ACTION_PRESENCE, "keyword_awake" if keyword_awake else "off"
+    )
+    if cfg.policy_enabled and not keyword_awake:
+        addressee = conversation.manager.addressee(group_key, bot_names=cfg.keywords)
+        relevant = conversation.manager.topic_relevant(group_key)
+        policy = participation.decide(addressee, relevant=relevant)
+        logger.info(
+            "presence policy group=%s target=%s score=%.2f action=%s reason=%s",
+            group_key,
+            addressee.target if addressee is not None else "-",
+            addressee.score if addressee is not None else 0.0,
+            policy.action,
+            policy.reason,
+        )
+
+    policy_pass = policy.action == participation.ACTION_PASS
+    force = keyword_awake or policy.action == participation.ACTION_REPLY
     if (
         not force
+        and not policy_pass
         and cfg.judge_enabled
         and presence.manager.state_of(group_key, now=clock) is PresenceState.AWAKE
     ):
@@ -222,7 +240,12 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0913
         force = True
 
     decision = presence.manager.observe_active(
-        presence_event, config=cfg, now=clock, roll=roll, force=force
+        presence_event,
+        config=cfg,
+        now=clock,
+        roll=roll,
+        force=force,
+        policy_pass=policy_pass,
     )
     logger.info(
         "presence decide group=%s state=%s action=%s reason=%s roll=%.3f p=%.3f",

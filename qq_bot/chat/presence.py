@@ -121,6 +121,7 @@ class PresenceConfig:
     keyword_homonym_mode: str = "skip"
     keyword_context_messages: int = 15
     keyword_fallback: str = "什么意思"
+    policy_enabled: bool = True
     judge_enabled: bool = False
     judge_timeout_sec: float = 1.5
     judge_context_messages: int = 8
@@ -329,7 +330,7 @@ class PresenceManager:
 
     # ── 主动路径（0-1 / 复读）────────────────────────────────────────
 
-    def observe_active(  # noqa: C901, PLR0911
+    def observe_active(  # noqa: C901, PLR0911, PLR0912, PLR0913
         self,
         event: PresenceEvent,
         *,
@@ -337,6 +338,7 @@ class PresenceManager:
         now: float,
         roll: float | None = None,
         force: bool = False,
+        policy_pass: bool = False,
     ) -> Decision:
         """一条非 @ 群消息的完整判定；``force`` 表示上层已判定要接。"""
         group = self._group(event.group_key, now)
@@ -395,10 +397,18 @@ class PresenceManager:
         if not is_acceptable(event):
             return self._skip(event, group, "not_acceptable")
 
+        if policy_pass:
+            # 会话图判定「这条不是对 bot 说的」：窗口内只累计 PASS，不接
+            if group.state is PresenceState.AWAKE:
+                self.note_pass(event.group_key, config=config, now=now)
+            return self._skip(event, group, "policy_pass")
+
         if group.state is PresenceState.AWAKE:
             return self._decide_awake(event, group, config, now, roll, force=force)
 
-        return self._decide_sleeping(event, group, config, now, roll)
+        return self._decide_sleeping(
+            event, group, config, now, roll, force=force
+        )
 
     def note_spoken(self, group_key: str, *, now: float) -> None:
         """主动消息发出后记账。"""
@@ -491,7 +501,7 @@ class PresenceManager:
         *,
         force: bool = False,
     ) -> Decision:
-        if now < group.last_spoke_at + config.reply_cooldown_sec:
+        if not force and now < group.last_spoke_at + config.reply_cooldown_sec:
             return self._skip(event, group, "cooldown")
         if group.daily_count >= config.daily_active:
             self._close(event.group_key, group, "daily_cap", config, now)
@@ -511,18 +521,32 @@ class PresenceManager:
             )
         return self._skip(event, group, "rate", roll=draw, threshold=threshold)
 
-    def _decide_sleeping(
+    def _decide_sleeping(  # noqa: PLR0913
         self,
         event: PresenceEvent,
         group: GroupPresence,
         config: PresenceConfig,
         now: float,
         roll: float | None,
+        *,
+        force: bool = False,
     ) -> Decision:
-        if now < group.wake_cooldown_until:
+        if not force and now < group.wake_cooldown_until:
             return self._skip(event, group, "cooldown")
         if group.daily_count >= config.daily_active:
             return self._skip(event, group, "daily_cap")
+        if force:
+            group.state = PresenceState.AWAKE
+            group.expires_at = now + config.window_sec
+            logger.info("presence forced wake group=%s", event.group_key)
+            return Decision(
+                Action.WAKE,
+                "forced_wake",
+                event.group_key,
+                group.state,
+                roll=_roll(roll),
+                threshold=1.0,
+            )
         threshold = _clamp(config.rate)
         if event.has_image:
             threshold *= config.image_rate_mult
@@ -729,6 +753,7 @@ def config_from(settings: Any) -> PresenceConfig:
             get("group_presence_keyword_context_messages", 15)
         ),
         keyword_fallback=str(get("group_presence_keyword_fallback", "什么意思")),
+        policy_enabled=bool(get("group_presence_policy_enabled", True)),
         judge_enabled=bool(get("group_presence_judge_enabled", False)),
         judge_timeout_sec=float(get("group_presence_judge_timeout_sec", 1.5)),
         judge_context_messages=int(

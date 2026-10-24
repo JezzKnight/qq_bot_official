@@ -3,10 +3,10 @@
 | 文档 | 内容 |
 |---|---|
 | [`group-presence.md`](group-presence.md) | 群聊存在感（Presence）与自动接话：状态机、0-1 抽奖、窗口、双冷却、静默、黑名单、可接性过滤、复读机、参数表、测试矩阵、迁移与分期 |
-| [`group-conversation.md`](group-conversation.md) | 群聊会话图：发言账本、指向解析、`[群聊状态]` 注入与分阶段（P1 已实现，P2 参与策略待做） |
+| [`group-conversation.md`](group-conversation.md) | 群聊会话图：发言账本、指向解析、`[群聊状态]` 注入、参与策略（P1、P2 已实现） |
 | [`state-machine.md`](state-machine.md) | 存在感状态机的 ASCII 图解：三态总图、三条入口管线、转移表、退出原因与参数快照 |
 
-当前进度：**v1.14，P1 + P2 + P3 均已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机 / 关键词三语境 + 回钩 / 窗口内三态判定）。
+当前进度：**v1.14，P1 + P2 + P3 均已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机 / 关键词三语境 + 回钩 / 窗口内三态判定）；群聊会话图 **P1 + P2** 已实现（发言账本 / 指向解析 / `[群聊状态]` 注入 / 参与策略）。
 
 版本变化：
 
@@ -31,3 +31,5 @@
 - 主动消息：个人认证 60 条/分钟（Bot 维度）、单群 20 条/分钟、每群每天 1000 条。
 
 评审待定项见 [`group-presence.md` 第 14 节](group-presence.md#14-开放问题评审时定)。
+
+- 会话图 v3：P2 参与策略落地——`qq_bot/chat/participation.py` 在 judge 前接管明确场景（叫 bot 必回、@ 别人不插嘴、话题无关 PASS），模糊情况仍交回 presence；`GROUP_PRESENCE_POLICY_ENABLED` 可整体回退。
