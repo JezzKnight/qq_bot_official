@@ -345,6 +345,11 @@ class PresenceManager:
             return self._skip(event, group, "duplicate")
         self._remember(group, event.message_id)
 
+        if group.state is PresenceState.AWAKE and event.mentions_other:
+            # 在场时看到别人 @ 另一个人：说明话题已经交给别人了，主动退场
+            self._close(event.group_key, group, "mention_other", config, now)
+            return self._skip(event, group, "mention_other")
+
         if (
             group.hook_until > now
             and not group.hook_used

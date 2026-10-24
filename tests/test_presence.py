@@ -104,6 +104,30 @@ def test_wake_sets_window_length(manager: PresenceManager) -> None:
     assert group.expires_at == 700.0
 
 
+def test_awake_sleeps_when_user_mentions_other(
+    manager: PresenceManager,
+) -> None:
+    config = config_from(cfg(group_presence_rate=1))
+    manager.observe_active(event(), config=config, now=0.0, roll=0.0)
+    assert manager.state_of("g1", now=0.0) is PresenceState.AWAKE
+
+    decision = manager.observe_active(
+        event(message_id="m2", text="@张三 你看这个", mentions_other=True),
+        config=config,
+        now=10.0,
+        roll=0.0,
+    )
+    assert decision.action is Action.NONE
+    assert decision.reason == "mention_other"
+    assert manager.state_of("g1", now=10.0) is PresenceState.SLEEPING
+
+    # 退场后进入唤醒冷却，不会立刻又被抽中
+    again = manager.observe_active(
+        event(message_id="m3"), config=config, now=11.0, roll=0.0
+    )
+    assert again.reason == "cooldown"
+
+
 def test_window_reply_cooldown_blocks(manager: PresenceManager) -> None:
     config = config_from(cfg(group_presence_rate=1))
     manager.observe_active(event(), config=config, now=0.0, roll=0.0)

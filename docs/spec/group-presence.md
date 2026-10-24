@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | v1.11（P1 + P2 已实现，实盘降噪） |
+| 版本 | v1.12（P1 + P2 已实现，实盘降噪） |
 | 日期 | 2026-10-24 |
 | 状态 | P1（存在感/抽奖/窗口/复读）与 P2（关键词）均已落地；按 10-24 评审校准：`RATE=0.2`、窗口内倍率 `2.0`、`DAILY_ACTIVE=120` |
 | 替代 | `qq_bot/chat/autotrigger.py` 的 L1 自动接话、`qq_bot/chat/activation.py` 的打分判定 |
@@ -82,6 +82,7 @@
 | `SLEEPING` | 合格消息 + 未中 | `SLEEPING` | — |
 | `AWAKE` | 合格消息 + 抽中 | `AWAKE` | 发言冷却已过、窗口条数未用尽 |
 | `AWAKE` | 窗口到期 | `SLEEPING` | 进入唤醒冷却 |
+| `AWAKE` | 消息 @ 了别人（非 bot） | `SLEEPING` | 话题已交给别人，立即退场并进入唤醒冷却 |
 | `AWAKE` | 日上限 / 窗口条数用尽 | `SLEEPING` | 进入唤醒冷却 |
 | `AWAKE` | 主动发送失败（权限/限流/违规） | `SLEEPING` | 见 §10 |
 | `任意` | @bot 且命中静默词 | `MUTED` | 先回执，再置静默（触发消息的回复不算解除） |
@@ -133,7 +134,12 @@ def on_group_message(msg, now):
     if state is MUTED:                      return
     if msg.author_openid in ignore_list:    return
 
-    # 3. 复读机：纯代码，不经过 LLM，不改变在场状态
+    # 3. 在场时看到别人被 @：主动退场
+    if state is AWAKE and msg.mentions_other:
+        exit_awake(now)                     # 回 SLEEPING + 唤醒冷却
+        return
+
+    # 4. 复读机：纯代码，不经过 LLM，不改变在场状态
     if repeat_enabled and is_repeatable(msg) and repeat.hit(msg, now):
         speak_repeat(msg, now)
         return
