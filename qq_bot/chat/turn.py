@@ -84,7 +84,9 @@ async def _download_images(incoming: Incoming) -> list[Any]:
     return images
 
 
-def _extra_notes(video_note: str, search_queries: list[str]) -> str | None:
+def _extra_notes(
+    video_note: str, search_queries: list[str], search_excerpt: str = ""
+) -> str | None:
     """给历史留一条"这轮发生过什么"的注脚。
 
     检索记录必须落库：工具调用不写历史，否则下一轮模型看不到自己查过，
@@ -95,8 +97,19 @@ def _extra_notes(video_note: str, search_queries: list[str]) -> str | None:
         notes.append(f"[视频分析记录，仅供后续对话参考]\n{video_note}")
     if search_queries:
         queries = "；".join(dict.fromkeys(search_queries))
-        notes.append(f"[检索记录] 这条回复查过网：{queries}")
+        note = f"[检索记录] 这条回复查过网：{queries}"
+        if search_excerpt:
+            note += f"\n摘录：{search_excerpt}"
+        notes.append(note)
     return "\n\n".join(notes) or None
+
+
+def _clip_excerpt(text: str, limit: int = 200) -> str:
+    """把搜索结果压成一行短摘录，供下一轮核对。"""
+    flat = " ".join((text or "").split())
+    if len(flat) <= limit:
+        return flat
+    return flat[:limit].rstrip() + "…"
 
 
 async def _send_pending_sticker(reply: Any, pending: tuple[str, bytes] | None) -> None:
@@ -206,7 +219,10 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 if parts.summary
                 else ""
             ),
-            speaker=f'当前发言人: uid="{uid}", name="{sender_name}"',
+            speaker=(
+                f'当前发言人: uid="{uid}", name="{sender_name}"'
+                + (f"\n{incoming.hint}" if incoming.hint else "")
+            ),
             memory=(
                 f"以下是本轮对话动态注入的长期记忆：\n{memory_prompt}"
                 if memory_prompt
@@ -301,6 +317,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     video_notes: list[str] = []
     last_search_query = ""
     search_queries: list[str] = []
+    search_excerpt = ""
     reply_parts_used = 0
     final_content = FALLBACK_TEXT
     for _ in range(MAX_TOOL_ROUNDS):
@@ -389,6 +406,8 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                         result = await tool["func"](**args)
                     finally:
                         current_search_tracker.set(None)
+                    if not search_excerpt and isinstance(result, str):
+                        search_excerpt = _clip_excerpt(result)
             else:
                 if func["name"] == "watch_video" and not video_ack_sent:
                     video_ack_sent = True
@@ -427,7 +446,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         sender_name=sender_name,
         user_text=f"{identity_tag}\n{incoming.text}",
         assistant_text=final_content,
-        extra_assistant_text=_extra_notes(video_note, search_queries),
+        extra_assistant_text=_extra_notes(video_note, search_queries, search_excerpt),
         usage=usage_context.snapshot(),
         model=model_name,
         sticker=pending_sticker[0] if pending_sticker is not None else None,

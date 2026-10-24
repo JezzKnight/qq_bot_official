@@ -54,6 +54,7 @@ class Incoming:
     message_id: str
     reply: ReplyTarget
     caps: PlatformCaps
+    hint: str = ""  # 仅给本轮 system prompt 的旁注，不写进用户原文
 
     @property
     def is_group(self) -> bool:

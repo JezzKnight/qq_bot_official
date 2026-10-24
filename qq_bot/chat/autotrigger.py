@@ -263,10 +263,6 @@ async def _speak(  # noqa: PLR0913
 ) -> bool:
     """跑一轮真实 turn，把结果记为一条主动消息。"""
     group_key = decision.group_key
-    if hint:
-        text = f"{hint}{incoming.text}" if incoming.text else hint
-    else:
-        text = incoming.text
     sender = send_text or _proactive_text(bot, event)
     try:
         if dispatch is not None:
@@ -274,7 +270,7 @@ async def _speak(  # noqa: PLR0913
         else:
             auto_incoming = replace(
                 incoming,
-                text=text,
+                hint=hint,
                 reply=ActiveReply(sender, _proactive_image(bot, event)),
             )
             await asyncio.wait_for(

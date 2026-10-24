@@ -2,11 +2,11 @@
 # modules 的顺序就是拼接顺序；条目格式为 name.version。
 # - name 对应 chat/{name}.md
 # - version 是版本标记（改内容时手动递增）
-version: 7
+version: 8
 modules:
   - persona.v1
   - social.v1
-  - uncertainty.v8
+  - uncertainty.v9
   - constraints.v1
   - platform.v1
   - multimodal.v1

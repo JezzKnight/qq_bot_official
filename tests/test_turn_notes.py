@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qq_bot.chat.turn import _extra_notes
+from qq_bot.chat.turn import _clip_excerpt, _extra_notes
 
 
 def test_search_note_only() -> None:
@@ -17,6 +17,23 @@ def test_video_and_search_notes_combined() -> None:
     assert note is not None
     assert "[视频分析记录" in note
     assert "[检索记录]" in note
+
+
+def test_search_excerpt_kept_for_later_check() -> None:
+    note = _extra_notes(
+        "",
+        ["PGL Masters Bucharest 2026 CS2 参赛队伍 名单"],
+        "Vitality 阵容：apEX 缺席 由 jL 替补",
+    )
+    assert note is not None
+    assert "摘录：Vitality 阵容：apEX 缺席 由 jL 替补" in note
+
+
+def test_excerpt_is_flattened_and_clipped() -> None:
+    excerpt = _clip_excerpt("第一行\n\n第二行 " + "长" * 300)
+    assert "\n" not in excerpt
+    assert excerpt.endswith("…")
+    assert len(excerpt) <= 201
 
 
 def test_no_notes_returns_none() -> None:
