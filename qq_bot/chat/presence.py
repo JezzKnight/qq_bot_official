@@ -302,8 +302,12 @@ class PresenceManager:
         group.keyword_until = now + config.keyword_cooldown_sec
         group.user_keyword_at[user_key] = now
         is_call = kind == "call"
-        if not is_call:
-            # 只有 ABOUT 才开场；CALL 只回一次，不把 bot 留在场上刷屏。
+        if is_call:
+            # 叫名字 = 明确被叫；进场，退出交给窗口内判定，窗口时长兜底。
+            group.state = PresenceState.AWAKE
+            group.expires_at = now + config.window_sec
+        else:
+            # ABOUT 是「被提到」不是「被叫」，开短窗 + 回钩。
             group.state = PresenceState.AWAKE
             group.expires_at = now + config.keyword_window_sec
             group.hook_until = now + config.hook_sec

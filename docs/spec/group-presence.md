@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | v1.13（P1 + P2 + P3 窗口内判定） |
+| 版本 | v1.14（CALL 进窗 + P3 判定控制退出） |
 | 日期 | 2026-10-24 |
 | 状态 | P1/P2/P3 均已落地；P3 默认关闭，`.env` 打开 `JUDGE_ENABLED` 后窗口内先判 `reply/pass/sleep` |
 | 替代 | `qq_bot/chat/autotrigger.py` 的 L1 自动接话、`qq_bot/chat/activation.py` 的打分判定 |
@@ -317,7 +317,7 @@ def on_group_message(msg, now):
 
 | 语境 | 判定信号 | 行为 |
 |---|---|---|
-| `CALL` 在叫 bot | 名字独立成句/位于句首；后跟「在吗/在不在/出来/问你/帮我」；同句出现「你」；引用或回复的是 bot 的消息；整条消息只有名字 | 正常 turn 回答一次；不进窗口（避免叫一声就把 bot 留在场上） |
+| `CALL` 在叫 bot | 名字独立成句/位于句首；后跟「在吗/在不在/出来/问你/帮我」；同句出现「你」；引用或回复的是 bot 的消息；整条消息只有名字 | 正常 turn 回答，并进入 `AWAKE`（`WINDOW_SEC`，默认 600 秒）；退出交给窗口内三态判定，窗口时长兜底 |
 | `ABOUT` 在聊 bot | 名字作第三人称主语/宾语；「大肥鱼怎么样/今天没说话/真菜」；没有同名信号 | 过渡句 + 邀请加入；进入窗口；开回钩 |
 | `HOMONYM` 不是 bot | 「我的/我家的/这条/买了/好吃/钓」；鱼、菜、宠物、游戏角色语境；@ 的是人类「大肥鱼」 | 默认不触发；可配置为「装傻加入」 |
 
@@ -351,7 +351,7 @@ def on_group_message(msg, now):
 - 接完清除回钩，回到常规窗口逻辑；
 - 120 秒内没人接，回钩自然过期。
 
-**窗口**：只有 `ABOUT` 进入 `AWAKE`（`KEYWORD_WINDOW_SEC`，默认 300 秒），并开回钩；`CALL` 只回答一次，状态保持 `SLEEPING`，后续消息仍按 0-1 抽奖与冷却走。
+**窗口**：`CALL` 进入 `AWAKE`（`WINDOW_SEC`，默认 600 秒），回答完后由 §6.10 判定 `REPLY/PASS/SLEEP` 控制退出，连续 `PASS` 或窗口到期兜底；`ABOUT` 进入短窗 `KEYWORD_WINDOW_SEC`（默认 300 秒）并开回钩。
 
 **额外闸门**：`KEYWORD_COOLDOWN_SEC`（群级，默认 120 秒）与 `KEYWORD_USER_COOLDOWN_SEC`（用户级，默认 300 秒），防止刷名字钓鱼；静默、日上限照旧，关键词不绕过任何一条。**黑名单用户的消息不触发关键词**（与 0-1 一致），但其 @bot 仍走被动回复。
 
@@ -518,8 +518,8 @@ presence error  group=... code=40034105 action=disable_proactive
 | 24 | 消息含图片/表情 | 不参与复读 |
 | 25 | RATE=0、复读开启 | 不抽奖，但复读仍可触发 |
 | 26 | 复读发送 40034006 | 不重试、状态不变 |
-| 27 | 单发「大肥鱼」 | `CALL`，回一次「在」，不开窗 |
-| 28 | 「大肥鱼 在吗」 | `CALL`，正常回答 |
+| 27 | 单发「大肥鱼」 | `CALL`，回「在」，并进 600 秒 `AWAKE` |
+| 28 | 「大肥鱼 在吗」 | `CALL`，正常回答，进窗口 |
 | 29 | 「我觉得我的大肥鱼更牛逼」 | `ABOUT`，过渡句带昵称 + 邀请，开回钩 |
 | 30 | 过渡后 120 秒内有人回「在聊原神」 | 回钩命中，正常接话 |
 | 31 | 「@张三 大肥鱼今天没来」 | 不触发 |
@@ -588,7 +588,7 @@ presence error  group=... code=40034105 action=disable_proactive
 - 抽奖在 `observe_active`：可接性 → 回钩 → 复读 → `AWAKE` 分支（`p = RATE × RATE_IN_WINDOW`）或 `SLEEPING` 分支（`p = RATE`）；纯图再乘 `IMAGE_RATE_MULT`。
 - 复读键 = `(被 @ openid 序列, 归一化文本)`；发送按原消息段重建（`MessageSegment.mention_user`），不写 `last_spoke_at`，只计入日上限；同一波 90 秒去重。
 - 静默：`observe_passive` 命中词 → 返回 `MUTE_ACK`，插件只发回执、不再跑 turn；触发那条消息的 ack 用 `mute_trigger_id` 排除，不会秒解除。
-- 关键词：`find_keyword` 命中后走 `fast_kind` 规则快路，歧义才调 `deepseek-v4-flash`（`max_tokens=8`，2 秒超时，fail-closed 到 `HOMONYM`）；`CALL` 直接跑 turn（不加 `AUTO_HINT`），只回一次、不开窗（状态保持 `SLEEPING`）；`ABOUT` 生成过渡句并主动发出，开 `KEYWORD_WINDOW` 与 `HOOK`；`HOMONYM` 跳过，不抽奖。
+- 关键词：`find_keyword` 命中后走 `fast_kind` 规则快路，歧义才调 `deepseek-v4-flash`（`max_tokens=8`，2 秒超时，fail-closed 到 `HOMONYM`）；`CALL` 直接跑 turn（不加 `AUTO_HINT`），并开 `AWAKE`（`WINDOW_SEC`），退出由 §6.10 判定控制、窗口时长兜底；`ABOUT` 生成过渡句并主动发出，开 `KEYWORD_WINDOW` 与 `HOOK`；`HOMONYM` 跳过，不抽奖。
 - 回钩：`ABOUT` 后 `HOOK_SEC` 内第一条可接消息直接回复（`HOOK_RATE` 默认 1.0），只用一次；`ABOUT` 的 0-1 抽奖在回钩之后才走。
 - 失败：`40034105` → 该群 `active_ok=False`；`40034006`/`429` → 关窗并冷却；网络错误连续 2 次 → 当天关闭主动。
 
