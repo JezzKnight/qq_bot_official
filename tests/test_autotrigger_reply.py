@@ -28,6 +28,41 @@ def test_active_reply_forwards_sticker() -> None:
     assert images == [("token来", b"gif-bytes")]
 
 
+def test_active_reply_forwards_markdown() -> None:
+    texts: list[str] = []
+    markdowns: list[str] = []
+
+    async def send_text(content: str) -> None:
+        texts.append(content)
+
+    async def send_markdown(content: str) -> None:
+        markdowns.append(content)
+
+    reply = ActiveReply(send_text, send_markdown=send_markdown)
+
+    async def run() -> None:
+        await reply.markdown("## 结论\n内容")
+
+    asyncio.run(run())
+    assert texts == []
+    assert markdowns == ["## 结论\n内容"]
+
+
+def test_active_reply_markdown_falls_back_to_text() -> None:
+    texts: list[str] = []
+
+    async def send_text(content: str) -> None:
+        texts.append(content)
+
+    reply = ActiveReply(send_text)
+
+    async def run() -> None:
+        await reply.markdown("## 结论")
+
+    asyncio.run(run())
+    assert texts == ["## 结论"]
+
+
 def test_active_reply_without_image_sender_is_noop() -> None:
     reply = ActiveReply(_noop)
 

@@ -60,9 +60,11 @@ class ActiveReply:
         self,
         send: Callable[[str], Awaitable[None]],
         send_image: Callable[[bytes, str], Awaitable[None]] | None = None,
+        send_markdown: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._send = send
         self._send_image = send_image
+        self._send_markdown = send_markdown
 
     async def text(self, content: str) -> None:
         await self._send(content)
@@ -77,6 +79,13 @@ class ActiveReply:
     async def image(self, data: bytes, name: str = "") -> None:
         if self._send_image is not None:
             await self._send_image(data, name)
+
+    async def markdown(self, content: str) -> None:
+        """查询类回答整段 Markdown 发送（msg_type=2）；没有通道时退回文本。"""
+        if self._send_markdown is not None:
+            await self._send_markdown(content)
+        else:
+            await self._send(content)
 
     async def finish(self) -> None:
         return None
@@ -297,7 +306,11 @@ async def _speak(  # noqa: PLR0913
             auto_incoming = replace(
                 incoming,
                 hint=hint,
-                reply=ActiveReply(sender, _proactive_image(bot, event)),
+                reply=ActiveReply(
+                    sender,
+                    _proactive_image(bot, event),
+                    _proactive_markdown(bot, event),
+                ),
             )
             body = await asyncio.wait_for(
                 run_turn(auto_incoming, config=config), timeout=TURN_TIMEOUT_SEC
@@ -619,6 +632,18 @@ def _proactive_image(
         except Exception:
             logger.warning("presence image 主动发送失败，回退被动", exc_info=True)
             await bot.send(event, seg)
+
+    return send
+
+
+def _proactive_markdown(bot: Any, event: Any) -> Callable[[str], Awaitable[None]]:
+    async def send(content: str) -> None:
+        from nonebot.adapters.qq import MessageSegment
+
+        await bot.send_to_group(
+            group_openid=event.group_openid,
+            message=MessageSegment.markdown(content),
+        )
 
     return send
 
