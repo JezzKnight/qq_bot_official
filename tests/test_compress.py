@@ -19,7 +19,6 @@ def _config(
         short_term=ShortTermConfig(conversation_window=window, thread_window=10),
         compression=CompressionConfig(
             trigger_turns=trigger,
-            summary_max_tokens=100,
             full_rebuild_every=rebuild_every,
         ),
     )
@@ -44,7 +43,7 @@ async def _seed(
     return ids
 
 
-async def fake_summary(previous, messages, _max_tokens) -> str:
+async def fake_summary(previous, messages) -> str:
     head = previous or ""
     tail = ";".join(f"{m['sender_name']}:{m['content']}" for m in messages)
     return f"{head}[{tail}]"

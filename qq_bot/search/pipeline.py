@@ -19,8 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_FAST_RESULTS = 10
-_FAST_CONTEXT_CHARS = 5000
+_FAST_RESULTS = 8
 DEFAULT_RETRY_QUERIES = 3
 
 
@@ -146,7 +145,7 @@ class SearchPipeline:
         if time_range:
             ranked = sort_by_recency(ranked)
         outcome.items = ranked
-        outcome.context = build_context(ranked, max_chars=_FAST_CONTEXT_CHARS)
+        outcome.context = build_context(ranked)
         outcome.cached = cache_hits == len(unique_queries)
         outcome.elapsed_ms = int((time.perf_counter() - started) * 1000)
         return outcome

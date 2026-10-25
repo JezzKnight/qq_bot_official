@@ -28,7 +28,7 @@ _tasks: set[asyncio.Task] = set()
 
 
 async def summarize_with_model(
-    previous: str | None, messages: list[dict], max_tokens: int
+    previous: str | None, messages: list[dict]
 ) -> str:
     """用低成本模型生成摘要；失败由上层捕获，不写库。"""
     cfg = get_memory_config()
@@ -37,7 +37,6 @@ async def summarize_with_model(
         "memory_summary",
         previous=previous or "（无）",
         transcript=format_transcript(messages),
-        max_chars=str(max_tokens * 2),
     )
     response = await client.chat(
         messages=[
@@ -46,7 +45,6 @@ async def summarize_with_model(
         ],
         model=api_model_name(cfg.compression.model),
         temperature=0.3,
-        max_tokens=max_tokens,
     )
     return (response.content or "").strip()
 

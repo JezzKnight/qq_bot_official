@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from qq_bot.memory.memory_config import BudgetConfig, MemoryConfig, ShortTermConfig
+from qq_bot.memory.memory_config import MemoryConfig, ShortTermConfig
 
 
 async def test_video_note_roundtrip(repo) -> None:
@@ -149,7 +149,6 @@ async def test_build_context_does_not_overlap(repo) -> None:
     )
     cfg = MemoryConfig(
         short_term=ShortTermConfig(conversation_window=10, thread_window=10),
-        budget=BudgetConfig(conversation_window=10_000, thread_window=10_000),
     )
     parts = await build_context(repo, thread_id=mine, group_id="G100", config=cfg)
     texts = [m.content for m in parts.conversation]
@@ -185,7 +184,6 @@ async def test_group_context_merges_threads_and_formats_summary(repo) -> None:
     )
     cfg = MemoryConfig(
         short_term=ShortTermConfig(conversation_window=10, thread_window=10),
-        budget=BudgetConfig(conversation_window=10_000, thread_window=10_000),
     )
     parts = await build_context(repo, thread_id=a, group_id="G200", config=cfg)
     assert [m.content for m in parts.conversation] == ["我先说", "他再说", "bot 回一句"]
@@ -213,7 +211,6 @@ async def test_group_context_moves_note_rows_to_ledger(repo) -> None:
     )
     cfg = MemoryConfig(
         short_term=ShortTermConfig(conversation_window=10, thread_window=10),
-        budget=BudgetConfig(conversation_window=10_000, thread_window=10_000),
     )
     parts = await build_context(repo, thread_id=tid, group_id="G300", config=cfg)
     assert [m.content for m in parts.conversation] == ["钓了几斤", "三斤"]
@@ -262,7 +259,6 @@ async def test_build_context_excludes_current_message(repo) -> None:
     )
     cfg = MemoryConfig(
         short_term=ShortTermConfig(thread_window=10),
-        budget=BudgetConfig(thread_window=10_000),
     )
     parts = await build_context(
         repo, thread_id=tid, group_id=None, config=cfg, exclude_external_id="M-now"
@@ -270,13 +266,20 @@ async def test_build_context_excludes_current_message(repo) -> None:
     assert parts.conversation == []
 
 
-async def test_budget_trims_oldest() -> None:
+async def test_repair_tool_pairs_keeps_valid_history() -> None:
     from qq_bot.ai.types import ChatMessage
-    from qq_bot.memory.assembler import trim_by_budget
+    from qq_bot.memory.assembler import repair_tool_pairs
 
-    msgs = [ChatMessage(role="user", content="字" * 100) for _ in range(10)]
-    trimmed = trim_by_budget(msgs, budget=250, keep_tail=2)
-    assert len(trimmed) == 2
+    msgs = [
+        ChatMessage(role="user", content="问"),
+        ChatMessage(
+            role="assistant",
+            tool_calls=[{"id": "c1", "type": "function", "function": {}}],
+            content="",
+        ),
+        ChatMessage(role="tool", content="结果", tool_call_id="c1"),
+    ]
+    assert [m.role for m in repair_tool_pairs(msgs)] == ["user", "assistant", "tool"]
 
 
 async def test_clear_group_summaries(repo) -> None:

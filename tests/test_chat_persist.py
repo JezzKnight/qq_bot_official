@@ -114,9 +114,9 @@ async def test_persist_writes_tool_trace_in_order(repo) -> None:
     assert rows[2]["content"] == "[S1] Vitality 2-1"
 
 
-def test_trim_by_budget_keeps_tool_pair() -> None:
+def test_repair_tool_pairs_keeps_pair_when_window_starts_mid_turn() -> None:
     from qq_bot.ai.types import ChatMessage
-    from qq_bot.memory.assembler import trim_by_budget
+    from qq_bot.memory.assembler import repair_tool_pairs
 
     pair = [
         ChatMessage(
@@ -127,21 +127,21 @@ def test_trim_by_budget_keeps_tool_pair() -> None:
         ChatMessage(role="tool", content="结果" * 100, tool_call_id="c1"),
     ]
     messages = [ChatMessage(role="user", content="问"), *pair]
-    trimmed = trim_by_budget(messages, budget=10, keep_tail=2)
-    assert [m.role for m in trimmed] == ["assistant", "tool"]
+    trimmed = repair_tool_pairs(messages)
+    assert [m.role for m in trimmed] == ["user", "assistant", "tool"]
 
 
-def test_trim_by_budget_drops_orphan_tool() -> None:
+def test_repair_tool_pairs_drops_orphan_tool() -> None:
     from qq_bot.ai.types import ChatMessage
-    from qq_bot.memory.assembler import trim_by_budget
+    from qq_bot.memory.assembler import repair_tool_pairs
 
     messages = [ChatMessage(role="tool", content="孤儿", tool_call_id="c1")]
-    assert trim_by_budget(messages, budget=100, keep_tail=1) == []
+    assert repair_tool_pairs(messages) == []
 
 
-def test_trim_by_budget_drops_trailing_tool_call_without_result() -> None:
+def test_repair_tool_pairs_drops_trailing_call_without_result() -> None:
     from qq_bot.ai.types import ChatMessage
-    from qq_bot.memory.assembler import trim_by_budget
+    from qq_bot.memory.assembler import repair_tool_pairs
 
     messages = [
         ChatMessage(role="user", content="问"),
@@ -151,5 +151,5 @@ def test_trim_by_budget_drops_trailing_tool_call_without_result() -> None:
             content="",
         ),
     ]
-    trimmed = trim_by_budget(messages, budget=1000, keep_tail=1)
+    trimmed = repair_tool_pairs(messages)
     assert [m.role for m in trimmed] == ["user"]

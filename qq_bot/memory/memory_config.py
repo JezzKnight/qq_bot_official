@@ -38,17 +38,8 @@ class ShortTermConfig:
 @dataclass(frozen=True)
 class CompressionConfig:
     trigger_turns: int = 30
-    summary_max_tokens: int = 500
     model: str = "deepseek-v41-flash"
     full_rebuild_every: int = 10
-
-
-@dataclass(frozen=True)
-class BudgetConfig:
-    long_term: int = 800
-    group_summary: int = 600
-    conversation_window: int = 4000
-    thread_window: int = 2500
 
 
 @dataclass(frozen=True)
@@ -64,7 +55,6 @@ class MemoryConfig:
     dsn: str = ""
     short_term: ShortTermConfig = field(default_factory=ShortTermConfig)
     compression: CompressionConfig = field(default_factory=CompressionConfig)
-    budget: BudgetConfig = field(default_factory=BudgetConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
 
     def connection_dsn(self) -> str:
@@ -115,11 +105,9 @@ def load_memory_config(path: str | Path | None = None) -> MemoryConfig:
 
     short = data.get("short_term") or {}
     comp = data.get("compression") or {}
-    budget = data.get("budget") or {}
     retention = data.get("retention") or {}
     base = ShortTermConfig()
     comp_base = CompressionConfig()
-    budget_base = BudgetConfig()
     ret_base = RetentionConfig()
 
     return MemoryConfig(
@@ -133,23 +121,10 @@ def load_memory_config(path: str | Path | None = None) -> MemoryConfig:
         ),
         compression=CompressionConfig(
             trigger_turns=_as_int(comp, "trigger_turns", comp_base.trigger_turns),
-            summary_max_tokens=_as_int(
-                comp, "summary_max_tokens", comp_base.summary_max_tokens
-            ),
             model=str(comp.get("model") or comp_base.model),
             full_rebuild_every=_as_int(
                 comp, "full_rebuild_every", comp_base.full_rebuild_every
             ),
-        ),
-        budget=BudgetConfig(
-            long_term=_as_int(budget, "long_term", budget_base.long_term),
-            group_summary=_as_int(
-                budget, "group_summary", budget_base.group_summary
-            ),
-            conversation_window=_as_int(
-                budget, "conversation_window", budget_base.conversation_window
-            ),
-            thread_window=_as_int(budget, "thread_window", budget_base.thread_window),
         ),
         retention=RetentionConfig(
             raw_days=_as_int(retention, "raw_days", ret_base.raw_days),

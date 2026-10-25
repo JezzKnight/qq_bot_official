@@ -26,14 +26,12 @@ _SPACE_RE = re.compile(r"[ \t\f\v]+")
 _MIN_DATED_ITEMS = 2
 _BLANK_RE = re.compile(r"\n{3,}")
 
-_MAX_CONTEXT_CHARS = 7000
-_MAX_ITEM_CHARS = 1600
 _MAX_PER_DOMAIN = 2
 _MAX_CJK_RUN = 6
 _MIN_TAIL_CHARS = 200
 
 
-def clean_snippet(raw: str, *, max_chars: int = _MAX_ITEM_CHARS) -> str:
+def clean_snippet(raw: str) -> str:
     """清洗搜索摘要，保留中文句子，去掉标签与多余空白。"""
     if not raw:
         return ""
@@ -43,17 +41,7 @@ def clean_snippet(raw: str, *, max_chars: int = _MAX_ITEM_CHARS) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [_SPACE_RE.sub(" ", line).strip() for line in text.splitlines()]
     text = "\n".join(line for line in lines if line)
-    text = _BLANK_RE.sub("\n\n", text).strip()
-    if len(text) > max_chars:
-        cut = text[:max_chars]
-        # 尽量在句末截断，避免半句话
-        boundary = max(
-            cut.rfind("。"), cut.rfind("！"), cut.rfind("？"), cut.rfind("\n")
-        )
-        if boundary > max_chars // 2:
-            cut = cut[: boundary + 1]
-        text = cut.rstrip() + "…"
-    return text
+    return _BLANK_RE.sub("\n\n", text).strip()
 
 
 def _terms(text: str) -> set[str]:
@@ -188,27 +176,15 @@ def dedupe_and_rerank(  # noqa: C901 - 去重 + 打分 + 分轮域名配额，�
     return selected[:limit]
 
 
-def build_context(
-    items: list[SearchItem], *, max_chars: int = _MAX_CONTEXT_CHARS
-) -> str:
+def build_context(items: list[SearchItem]) -> str:
     """拼成带 [S1] 编号的上下文；编号供最终回答引用。"""
     if not items:
         return ""
     blocks: list[str] = []
-    used = 0
     for index, item in enumerate(items, start=1):
         snippet = clean_snippet(item.content)
         header = f"[S{index}] {item.title.strip() or item.url}\nURL: {item.url}"
         if item.published_date:
             header += f"\n日期: {item.published_date}"
-        block = f"{header}\n{snippet}" if snippet else header
-        if used + len(block) > max_chars:
-            remaining = max_chars - used
-            if remaining > _MIN_TAIL_CHARS:
-                blocks.append(block[:remaining].rstrip() + "…")
-            break
-        blocks.append(block)
-        used += len(block) + 2
-    context = "\n\n".join(blocks)
-    # 末尾的省略号也算字符；硬裁一次，保证调用方的 context 预算不被突破。
-    return context[:max_chars].rstrip()
+        blocks.append(f"{header}\n{snippet}" if snippet else header)
+    return "\n\n".join(blocks)

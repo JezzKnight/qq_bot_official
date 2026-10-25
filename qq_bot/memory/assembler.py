@@ -46,44 +46,11 @@ class ContextParts:
 _MIN_KEEP = 2
 
 
-def _group_units(messages: list[ChatMessage]) -> list[list[ChatMessage]]:
-    """把 assistant(tool_calls) 与其后的 tool 结果捆成一个不可拆的单元。"""
-    units: list[list[ChatMessage]] = []
-    index = 0
-    while index < len(messages):
-        msg = messages[index]
-        if msg.role == "assistant" and msg.tool_calls:
-            unit = [msg]
-            index += 1
-            while index < len(messages) and messages[index].role == "tool":
-                unit.append(messages[index])
-                index += 1
-            units.append(unit)
-        else:
-            units.append([msg])
-            index += 1
-    return units
-
-
-def trim_by_budget(
-    messages: list[ChatMessage], budget: int, *, keep_tail: int = _MIN_KEEP
-) -> list[ChatMessage]:
-    """按 token 预算从最旧裁，至少保留尾部 keep_tail 条；tool 调用对不拆开。"""
-    units = _group_units(messages)
-    total = sum(estimate_tokens(m.content) for m in messages)
-    start = 0
-    kept = len(messages)
-    while total > budget and kept > keep_tail and start < len(units):
-        unit = units[start]
-        for item in unit:
-            total -= estimate_tokens(item.content)
-        kept -= len(unit)
-        start += 1
-    result = [item for unit in units[start:] for item in unit]
-    # 兜底：开头若有孤立 tool 行（其 parent 不在窗口内），API 会 400，去掉。
+def repair_tool_pairs(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """按条数取窗口后修掉被截断的工具调用对，避免 API 400。"""
+    result = list(messages)
     while result and result[0].role == "tool":
         result.pop(0)
-    # 末尾若有 assistant(tool_calls) 却缺 tool 回复（被窗口截断），同样去掉。
     if result and result[-1].role == "assistant" and result[-1].tool_calls:
         result.pop()
     return result
@@ -149,7 +116,7 @@ async def build_context(
         parts.notes = "\n\n".join(
             (m.content or "").strip() for m in note_rows[-_MAX_NOTES:]
         )
-        parts.conversation = trim_by_budget(history, config.budget.thread_window)
+        parts.conversation = repair_tool_pairs(history)
         parts.stats = {"conversation": len(parts.conversation)}
         return parts
 
@@ -163,7 +130,7 @@ async def build_context(
     parts.notes = "\n\n".join(
         (m.content or "").strip() for m in note_rows[-_MAX_NOTES:]
     )
-    parts.conversation = trim_by_budget(rows, config.budget.conversation_window)
+    parts.conversation = repair_tool_pairs(rows)
     summary_row = await repo.latest_summary_row(group_id)
     if summary_row:
         parts.summary = format_summary(summary_row)

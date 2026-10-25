@@ -123,7 +123,7 @@ async def _compress_locked(
         return None
 
     raw = await summarize(
-        previous, messages, config.compression.summary_max_tokens
+        previous, messages
     )
     content = raw.strip()
     if not content:

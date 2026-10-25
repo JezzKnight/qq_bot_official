@@ -100,15 +100,6 @@ def test_dedupe_and_rerank_prefers_diverse_domains() -> None:
     assert len({item.url.split("/")[2] for item in ranked}) == 2
 
 
-def test_build_context_hard_caps_length() -> None:
-    items = [
-        SearchItem(f"标题{i}", f"https://example.com/{i}", "正文" * 400)
-        for i in range(6)
-    ]
-    context = build_context(items, max_chars=600)
-    assert len(context) <= 600
-
-
 def test_build_context_numbers_sources() -> None:
     context = build_context(
         [

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1/tools/search"
 DEFAULT_TIMEOUT = 30.0
-MAX_RESULTS = 10
+MAX_RESULTS = 8
 HTTP_OK = 200
 
 
