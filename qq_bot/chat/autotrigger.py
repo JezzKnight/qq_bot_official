@@ -422,7 +422,7 @@ async def _keyword_context(
             incoming.group_key, config.keyword_context_messages
         )
         summary = await memory.latest_summary(incoming.group_key)
-        return list(window), summary
+        return [m for m in window if m.role != "tool"], summary
     except Exception:
         logger.warning("keyword context unavailable, fallback", exc_info=True)
         return [], None
@@ -476,6 +476,7 @@ async def _judge_action(
             window = await memory.recent_group_messages(
                 incoming.group_key, config.judge_context_messages
             )
+            window = [m for m in window if m.role != "tool"]
             recent = [
                 {
                     "role": message.role,

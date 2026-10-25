@@ -72,6 +72,7 @@ def _compression_scheduler(incoming: Incoming):
 
 
 MAX_TOOL_ROUNDS = 5
+TOOL_TRACE_CHARS = 800
 MAX_VIDEO_NOTE_CHARS = 1600
 FALLBACK_TEXT = "AI暂时无法响应，请稍后重试"
 
@@ -89,6 +90,12 @@ async def _download_images(incoming: Incoming) -> list[Any]:
 _NOTE_PREFIXES = ("[检索记录]", "[视频分析记录")
 
 
+def _clip_text(text: str, limit: int) -> str:
+    """落库的工具输出裁剪，控制进上下文的历史体积。"""
+    value = (text or "").strip()
+    return value if len(value) <= limit else value[:limit] + "…"
+
+
 def _strip_echoed_notes(text: str) -> str:
     """模型有时会把系统台账当成自己的发言复述出来；发送前剥掉开头这段。"""
     cleaned = (text or "").lstrip()
@@ -96,34 +103,6 @@ def _strip_echoed_notes(text: str) -> str:
         idx = cleaned.find("\n\n")
         cleaned = "" if idx < 0 else cleaned[idx + 2 :].lstrip()
     return cleaned
-
-
-def _extra_notes(
-    video_note: str, search_queries: list[str], search_excerpt: str = ""
-) -> str | None:
-    """给历史留一条"这轮发生过什么"的注脚。
-
-    检索记录必须落库：工具调用不写历史，否则下一轮模型看不到自己查过，
-    被质疑时会把真查过的信息认成"我没查就编的"。
-    """
-    notes: list[str] = []
-    if video_note:
-        notes.append(f"[视频分析记录，仅供后续对话参考]\n{video_note}")
-    if search_queries:
-        queries = "；".join(dict.fromkeys(search_queries))
-        note = f"[检索记录] 这条回复查过网：{queries}"
-        if search_excerpt:
-            note += f"\n摘录：{search_excerpt}"
-        notes.append(note)
-    return "\n\n".join(notes) or None
-
-
-def _clip_excerpt(text: str, limit: int = 200) -> str:
-    """把搜索结果压成一行短摘录，供下一轮核对。"""
-    flat = " ".join((text or "").split())
-    if len(flat) <= limit:
-        return flat
-    return flat[:limit].rstrip() + "…"
 
 
 async def _send_pending_sticker(reply: Any, pending: tuple[str, bytes] | None) -> None:
@@ -374,10 +353,9 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     video_ack_sent = False
     video_notes: list[str] = []
     last_search_query = ""
-    search_queries: list[str] = []
-    search_excerpt = ""
     reply_parts_used = 0
     final_content = FALLBACK_TEXT
+    tool_trace: list[ChatMessage] = []
     for _ in range(MAX_TOOL_ROUNDS):
         response = await client.chat(
             messages=messages,
@@ -443,6 +421,21 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 reasoning_content=response.reasoning_content,
             )
         )
+        tool_trace.append(
+            ChatMessage(
+                role="assistant",
+                tool_calls=[
+                    {
+                        **tc,
+                        "function": {
+                            **tc["function"],
+                            "arguments": _clip_text(tc["function"]["arguments"], 400),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ],
+            )
+        )
         for tc in response.tool_calls:
             func = tc["function"]
             tool = TOOLS[func["name"]]
@@ -453,7 +446,6 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 else:
                     search_called = True
                     last_search_query = str(args.get("query") or incoming.text)
-                    search_queries.append(last_search_query)
                     tracker: SearchTracker = {
                         "tavily_success": False,
                         "tavily_error_count": 0,
@@ -464,8 +456,6 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                         result = await tool["func"](**args)
                     finally:
                         current_search_tracker.set(None)
-                    if not search_excerpt and isinstance(result, str):
-                        search_excerpt = _clip_excerpt(result)
             else:
                 if func["name"] == "watch_video" and not video_ack_sent:
                     video_ack_sent = True
@@ -484,6 +474,13 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
 
             messages.append(
                 ChatMessage(role="tool", content=result, tool_call_id=tc["id"])
+            )
+            tool_trace.append(
+                ChatMessage(
+                    role="tool",
+                    content=_clip_text(result, TOOL_TRACE_CHARS),
+                    tool_call_id=tc["id"],
+                )
             )
     else:
         final_content = FALLBACK_TEXT
@@ -504,7 +501,8 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         sender_name=sender_name,
         user_text=f"{identity_tag}\n{incoming.text}",
         assistant_text=final_content,
-        extra_assistant_text=_extra_notes(video_note, search_queries, search_excerpt),
+        extra_assistant_text=None,
+        tool_trace=tool_trace,
         usage=usage_context.snapshot(),
         model=model_name,
         sticker=pending_sticker[0] if pending_sticker is not None else None,

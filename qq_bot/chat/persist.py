@@ -49,11 +49,22 @@ async def persist_assistant(  # noqa: PLR0913 —— 一行的完整列，拆开
     usage: Any | None = None,
     model: str | None = None,
     schedule: Callable[[str], None] | None = None,
+    tool_trace: list[Any] | None = None,
 ) -> None:
     """只写 assistant 消息和可选的分析笔记；用户消息已由 persist_user 写入。"""
     if memory is None or thread_id is None:
         return
     try:
+        for item in tool_trace or []:
+            await memory.append(
+                thread_id=thread_id,
+                group_id=group_id,
+                sender_id=None,
+                role=item.role,
+                content=item.content or "",
+                tool_calls=item.tool_calls,
+                tool_call_id=item.tool_call_id,
+            )
         await memory.append(
             thread_id=thread_id,
             group_id=group_id,
@@ -99,6 +110,7 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
     model: str | None = None,
     schedule: Callable[[str], None] | None = None,
     external_id: str | None = None,
+    tool_trace: list[Any] | None = None,
 ) -> None:
     """落库一轮完整对话；失败只记日志，不影响已经生成的回复。"""
     await persist_user(
@@ -120,4 +132,5 @@ async def persist_turn(  # noqa: PLR0913 —— 一轮对话的完整字段
         usage=usage,
         model=model,
         schedule=schedule,
+        tool_trace=tool_trace,
     )

@@ -71,3 +71,85 @@ async def test_persist_writes_extra_assistant_note(repo) -> None:
     )
     assert [r["role"] for r in rows] == ["user", "assistant", "assistant"]
     assert "暗猫是碧蓝幻想角色" in rows[2]["content"]
+
+
+async def test_persist_writes_tool_trace_in_order(repo) -> None:
+    from qq_bot.ai.types import ChatMessage
+
+    thread_id = await repo.ensure_thread("private", None, "U3215481708")
+    trace = [
+        ChatMessage(
+            role="assistant",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "search", "arguments": '{"query":"CS2"}'},
+                }
+            ],
+        ),
+        ChatMessage(role="tool", content="[S1] Vitality 2-1", tool_call_id="call_1"),
+    ]
+    await persist_turn(
+        repo,
+        thread_id=thread_id,
+        group_id=None,
+        sender_id="U3215481708",
+        sender_name="杨神",
+        user_text="查一下",
+        assistant_text="赢了",
+        usage=_usage(),
+        model="deepseek-v4-flash",
+        tool_trace=trace,
+    )
+    rows = await repo.pool.fetch(
+        "SELECT role, content, tool_calls, tool_call_id FROM messages "
+        " WHERE thread_id=$1 ORDER BY id",
+        thread_id,
+    )
+    assert [r["role"] for r in rows] == ["user", "assistant", "tool", "assistant"]
+    assert rows[1]["tool_calls"][0]["id"] == "call_1"
+    assert rows[1]["content"] == ""
+    assert rows[2]["tool_call_id"] == "call_1"
+    assert rows[2]["content"] == "[S1] Vitality 2-1"
+
+
+def test_trim_by_budget_keeps_tool_pair() -> None:
+    from qq_bot.ai.types import ChatMessage
+    from qq_bot.memory.assembler import trim_by_budget
+
+    pair = [
+        ChatMessage(
+            role="assistant",
+            tool_calls=[{"id": "c1", "type": "function", "function": {}}],
+            content="",
+        ),
+        ChatMessage(role="tool", content="结果" * 100, tool_call_id="c1"),
+    ]
+    messages = [ChatMessage(role="user", content="问"), *pair]
+    trimmed = trim_by_budget(messages, budget=10, keep_tail=2)
+    assert [m.role for m in trimmed] == ["assistant", "tool"]
+
+
+def test_trim_by_budget_drops_orphan_tool() -> None:
+    from qq_bot.ai.types import ChatMessage
+    from qq_bot.memory.assembler import trim_by_budget
+
+    messages = [ChatMessage(role="tool", content="孤儿", tool_call_id="c1")]
+    assert trim_by_budget(messages, budget=100, keep_tail=1) == []
+
+
+def test_trim_by_budget_drops_trailing_tool_call_without_result() -> None:
+    from qq_bot.ai.types import ChatMessage
+    from qq_bot.memory.assembler import trim_by_budget
+
+    messages = [
+        ChatMessage(role="user", content="问"),
+        ChatMessage(
+            role="assistant",
+            tool_calls=[{"id": "c1", "type": "function", "function": {}}],
+            content="",
+        ),
+    ]
+    trimmed = trim_by_budget(messages, budget=1000, keep_tail=1)
+    assert [m.role for m in trimmed] == ["user"]
