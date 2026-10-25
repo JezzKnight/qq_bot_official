@@ -55,27 +55,3 @@ def test_query_prompt_is_markdown_oriented() -> None:
     assert "Markdown" in text
     assert "专有名词" in text
 
-
-async def _collect_parts(content: str, max_parts: int = 4) -> list[str]:
-    from qq_bot.chat.turn import _send_markdown_parts
-
-    parts: list[str] = []
-
-    async def send(part: str) -> None:
-        parts.append(part)
-
-    await _send_markdown_parts(
-        send, content, max_parts=max_parts, simulate_typing=False
-    )
-    return parts
-
-
-async def test_markdown_splits_on_blank_lines() -> None:
-    parts = await _collect_parts("## 结论\n\n- 要点一\n\n- 要点二")
-    assert parts == ["## 结论", "- 要点一", "- 要点二"]
-
-
-async def test_markdown_keeps_code_fence_whole() -> None:
-    content = "说明\n\n```\na\n\nb\n```"
-    parts = await _collect_parts(content)
-    assert parts == [content]

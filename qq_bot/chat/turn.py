@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import replace
@@ -31,7 +30,7 @@ from qq_bot.memory.assembler import ContextParts, build_context, trim_messages
 from qq_bot.memory.members import members_xml
 from qq_bot.memory.memory_config import get_memory_config
 from qq_bot.memory.naming import escape_for_prompt
-from qq_bot.platform.reply import send_reply_chunks, split_for_reply, typing_delay
+from qq_bot.platform.reply import send_reply_chunks, split_for_reply
 from qq_bot.search.retry import RETRY_ACK, looks_insufficient
 from qq_bot.services import token_usage
 from qq_bot.services.client_factory import (
@@ -62,8 +61,6 @@ from qq_bot.tools import (
 from qq_bot.tools.search_tool import retry_search
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from qq_bot.platform.ports import Incoming
 
 logger = logging.getLogger(__name__)
@@ -161,25 +158,6 @@ async def run_turn(incoming: Incoming, *, config: Any) -> str:
     """执行一轮对话；同一会话内串行，避免两轮回复的分段消息在群里交叉。"""
     async with session_lock(group_session_key(incoming.group_key, incoming.user_key)):
         return await _run_turn(incoming, config=config)
-
-
-async def _send_markdown_parts(
-    send: Callable[[str], Awaitable[None]],
-    content: str,
-    *,
-    max_parts: int,
-    simulate_typing: bool = True,
-) -> int:
-    """按空行把 Markdown 拆成多条消息；含代码块时不拆，避免破坏格式。"""
-    if "```" in content:
-        parts = [content]
-    else:
-        parts = split_for_reply(content, max_parts=max_parts)
-    for index, part in enumerate(parts):
-        if index and simulate_typing:
-            await asyncio.sleep(typing_delay(part))
-        await send(part)
-    return len(parts)
 
 
 async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler 的主流程
@@ -543,16 +521,9 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         and getattr(config, "query_markdown_enabled", True)
     ):
         try:
-            sent = await _send_markdown_parts(
-                markdown,
-                final_content,
-                max_parts=max_parts,
-                simulate_typing=getattr(config, "reply_typing_delay", True),
-            )
+            await markdown(final_content)
             markdown_sent = True
-            logger.info(
-                "TURN markdown sent parts=%d chars=%d", sent, len(final_content)
-            )
+            logger.info("TURN markdown sent chars=%d", len(final_content))
         except Exception:  # 发送失败只降级，不影响本轮
             logger.warning("查询模式 Markdown 发送失败，回退文本分段", exc_info=True)
 
