@@ -86,6 +86,18 @@ async def _download_images(incoming: Incoming) -> list[Any]:
     return images
 
 
+_NOTE_PREFIXES = ("[检索记录]", "[视频分析记录")
+
+
+def _strip_echoed_notes(text: str) -> str:
+    """模型有时会把系统台账当成自己的发言复述出来；发送前剥掉开头这段。"""
+    cleaned = (text or "").lstrip()
+    while cleaned.startswith(_NOTE_PREFIXES):
+        idx = cleaned.find("\n\n")
+        cleaned = "" if idx < 0 else cleaned[idx + 2 :].lstrip()
+    return cleaned
+
+
 def _extra_notes(
     video_note: str, search_queries: list[str], search_excerpt: str = ""
 ) -> str | None:
@@ -264,6 +276,12 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 if memory_prompt
                 else ""
             ),
+            records=(
+                "## 系统台账（你自己查过的记录；不要复述，也不要模仿这个格式）\n"
+                f"{parts.notes}"
+                if parts.notes
+                else ""
+            ),
             time=f"当前对话发生的时间为{now} (UTC+8)，以此时间为准",
         )
     )
@@ -415,7 +433,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                         )
                     )
                     continue
-            final_content = answer or "AI暂时无法响应"
+            final_content = _strip_echoed_notes(answer) or "AI暂时无法响应"
             break
 
         messages.append(

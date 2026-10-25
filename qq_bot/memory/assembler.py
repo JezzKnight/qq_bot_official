@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from .pg_repo import PgRepository
 
 _TZ = ZoneInfo("Asia/Shanghai")
+_NOTE_PREFIXES = ("[检索记录]", "[视频分析记录")
+_MAX_NOTES = 3
 SUMMARY_HINT = "（以上为群聊摘要，仅供参考；请自行判断是否与当前话题有关。）"
 
 
@@ -34,6 +36,7 @@ SUMMARY_HINT = "（以上为群聊摘要，仅供参考；请自行判断是否�
 class ContextParts:
     conversation: list[ChatMessage] = field(default_factory=list)
     summary: str | None = None
+    notes: str = ""
     stats: dict[str, int] = field(default_factory=dict)
 
     def as_history(self) -> list[ChatMessage]:
@@ -77,6 +80,10 @@ def trim_messages(messages: list[ChatMessage], budget: int) -> list[ChatMessage]
     return result
 
 
+def _is_note(content: str | None) -> bool:
+    return (content or "").startswith(_NOTE_PREFIXES)
+
+
 def _fmt_time(value: datetime | None) -> str:
     if value is None:
         return "未知"
@@ -106,6 +113,11 @@ async def build_context(
         history = await repo.history(thread_id, config.short_term.thread_window)
         if exclude_external_id:
             history = [m for m in history if m.external_id != exclude_external_id]
+        note_rows = [m for m in history if _is_note(m.content)]
+        history = [m for m in history if not _is_note(m.content)]
+        parts.notes = "\n\n".join(
+            (m.content or "").strip() for m in note_rows[-_MAX_NOTES:]
+        )
         parts.conversation = trim_by_budget(history, config.budget.thread_window)
         parts.stats = {"conversation": len(parts.conversation)}
         return parts
@@ -115,6 +127,11 @@ async def build_context(
     )
     if exclude_external_id:
         rows = [m for m in rows if m.external_id != exclude_external_id]
+    note_rows = [m for m in rows if _is_note(m.content)]
+    rows = [m for m in rows if not _is_note(m.content)]
+    parts.notes = "\n\n".join(
+        (m.content or "").strip() for m in note_rows[-_MAX_NOTES:]
+    )
     parts.conversation = trim_by_budget(rows, config.budget.conversation_window)
     summary_row = await repo.latest_summary_row(group_id)
     if summary_row:
@@ -122,5 +139,6 @@ async def build_context(
     parts.stats = {
         "conversation": len(parts.conversation),
         "summary_tokens": estimate_tokens(parts.summary),
+        "notes_tokens": estimate_tokens(parts.notes),
     }
     return parts

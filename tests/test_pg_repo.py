@@ -195,6 +195,31 @@ async def test_group_context_merges_threads_and_formats_summary(repo) -> None:
     assert "他们把钓鱼的事聊完了。" in parts.summary
 
 
+async def test_group_context_moves_note_rows_to_ledger(repo) -> None:
+    from qq_bot.memory.assembler import build_context
+
+    tid = await repo.ensure_thread("group_member", "G300", "U1")
+    await repo.append(
+        thread_id=tid, group_id="G300", sender_id="U1", role="user",
+        content="钓了几斤", sender_name="小明",
+    )
+    await repo.append(
+        thread_id=tid, group_id="G300", sender_id="U1", role="assistant",
+        content="三斤", sender_name=None,
+    )
+    await repo.append(
+        thread_id=tid, group_id="G300", sender_id="U1", role="assistant",
+        content="[检索记录] 这条回复查过网：钓鱼", sender_name=None,
+    )
+    cfg = MemoryConfig(
+        short_term=ShortTermConfig(conversation_window=10, thread_window=10),
+        budget=BudgetConfig(conversation_window=10_000, thread_window=10_000),
+    )
+    parts = await build_context(repo, thread_id=tid, group_id="G300", config=cfg)
+    assert [m.content for m in parts.conversation] == ["钓了几斤", "三斤"]
+    assert parts.notes == "[检索记录] 这条回复查过网：钓鱼"
+
+
 async def test_duplicate_external_id_is_ignored(repo) -> None:
     tid = await repo.ensure_thread("group_member", "G100", "U7")
     first = await repo.append(

@@ -16,6 +16,7 @@ class SystemPromptParts:
     speaker: str
     memory: str
     time: str
+    records: str = ""
     mode: str = ""
 
 
@@ -32,6 +33,7 @@ def build_system_prompt(parts: SystemPromptParts) -> str:
             parts.speaker,
             parts.memory,
             parts.time,
+            parts.records,
         )
         if chunk
     )
