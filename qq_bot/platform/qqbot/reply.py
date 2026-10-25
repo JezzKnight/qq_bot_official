@@ -104,6 +104,18 @@ class QQReply:
         message = MessageSegment.markdown(content) + MessageSegment.keyboard(keyboard)
         await self._send(message, passive=True)
 
+    async def markdown(self, content: str) -> None:
+        """整段 Markdown 作为一条消息（msg_type=2）；被动失败时退回主动发送。"""
+        seg = MessageSegment.markdown(content)
+        try:
+            await self._send(seg, passive=True)
+        except ActionFailed:
+            group_openid = getattr(self._event, "group_openid", None)
+            if not group_openid:
+                raise
+            logger.warning("QQ Markdown 被动发送失败，改走主动", exc_info=True)
+            await self._send(seg, passive=False)
+
     async def image(self, data: bytes, name: str = "") -> bool:
         """发送图片；内容违规时只提示一次并返回 False，调用方可提前结束批量发图。"""
         if self._violation_notified:

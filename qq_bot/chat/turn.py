@@ -495,17 +495,32 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     )
     logger.info("TURN persist done")
 
-    max_parts = max(1, incoming.reply.max_parts - reply_parts_used)
-    if pending_sticker is not None and max_parts > 1:
-        # 给表情包留一次发送额度
-        max_parts -= 1
-    chunks = split_for_reply(final_content, max_parts=max_parts)
-    await send_reply_chunks(
-        incoming.reply,
-        chunks,
-        mention_user_key=incoming.user_key if is_group else None,
-        simulate_typing=getattr(config, "reply_typing_delay", True),
-    )
+    markdown_sent = False
+    markdown = getattr(incoming.reply, "markdown", None)
+    if (
+        mode_part
+        and markdown is not None
+        and getattr(config, "query_markdown_enabled", True)
+    ):
+        try:
+            await markdown(final_content)
+            markdown_sent = True
+            logger.info("TURN markdown sent chars=%d", len(final_content))
+        except Exception:  # 发送失败只降级，不影响本轮
+            logger.warning("查询模式 Markdown 发送失败，回退文本分段", exc_info=True)
+
+    if not markdown_sent:
+        max_parts = max(1, incoming.reply.max_parts - reply_parts_used)
+        if pending_sticker is not None and max_parts > 1:
+            # 给表情包留一次发送额度
+            max_parts -= 1
+        chunks = split_for_reply(final_content, max_parts=max_parts)
+        await send_reply_chunks(
+            incoming.reply,
+            chunks,
+            mention_user_key=incoming.user_key if is_group else None,
+            simulate_typing=getattr(config, "reply_typing_delay", True),
+        )
     await _send_pending_sticker(incoming.reply, pending_sticker)
     await incoming.reply.finish()
     return final_content
