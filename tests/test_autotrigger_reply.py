@@ -74,3 +74,9 @@ def test_active_reply_without_image_sender_is_noop() -> None:
 
 async def _noop(_content: str) -> None:  # pragma: no cover - 只为构造对象
     return None
+
+
+def test_active_reply_allows_up_to_four_parts() -> None:
+    from qq_bot.chat.autotrigger import ActiveReply
+
+    assert ActiveReply.max_parts == 4

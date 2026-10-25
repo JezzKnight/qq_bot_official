@@ -50,11 +50,11 @@ _MEDIA_SEGMENTS = frozenset(
 class ActiveReply:
     """一条主动消息的 ReplyTarget：不带 @、失败要能上报。
 
-    ``max_parts = 1``：自动接话只说一条，避免一次刷出好几段主动消息。
+    自动接话最多 4 段（与被动回复一致）；模型用空行分段时才多发。
     """
 
     uses_proactive = True
-    max_parts = 1
+    max_parts = 4
 
     def __init__(
         self,
