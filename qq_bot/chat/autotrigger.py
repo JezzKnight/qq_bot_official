@@ -134,6 +134,17 @@ async def maybe_autotrigger(  # noqa: PLR0913 —— 入口签名由插件固定
         return False
 
 
+MUTE_REQUEST_MAX_CHARS = 10
+
+
+def _looks_like_mute_request(config: presence.PresenceConfig, text: str) -> bool:
+    """活跃期里没 @ 的「闭嘴」也认：短句且含静默词。"""
+    body = (text or "").strip()
+    if not body or len(body) > MUTE_REQUEST_MAX_CHARS:
+        return False
+    return any(word in body for word in config.mute_words)
+
+
 async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
     bot: Any,
     event: Any,
@@ -213,10 +224,43 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
             return False
         keyword_awake = True
 
-    policy = participation.PolicyDecision(
-        participation.ACTION_PRESENCE, "keyword_awake" if keyword_awake else "off"
+    grace = (
+        not keyword_awake
+        and presence.manager.in_active_grace(group_key, config=cfg, now=clock)
     )
-    if cfg.policy_enabled and not keyword_awake:
+    if grace:
+        logger.info("presence grace group=%s reason=active_grace", group_key)
+        # 活跃期只放宽「接不接」：@ 别人说明话题已交出去，照样退场。
+        addressee = conversation.manager.addressee(group_key, bot_names=cfg.keywords)
+        if addressee is not None and addressee.target not in (
+            conversation.BOT_TARGET,
+            conversation.GROUP_TARGET,
+        ):
+            presence.manager.close_window(
+                group_key, reason="mention_other", config=cfg, now=clock
+            )
+            logger.info("presence grace exit group=%s reason=mention_other", group_key)
+            return False
+        # 明确让人闭嘴就闭嘴，不因为活跃期硬回。
+        if not presence_event.mentions_other and _looks_like_mute_request(
+            cfg, incoming.text
+        ):
+            presence.manager.observe_passive(
+                group_key=group_key,
+                user_key=incoming.user_key,
+                text=incoming.text,
+                message_id=incoming.message_id,
+                config=cfg,
+                now=clock,
+            )
+            logger.info("presence grace mute group=%s", group_key)
+            return False
+
+    policy = participation.PolicyDecision(
+        participation.ACTION_PRESENCE,
+        "active_grace" if grace else ("keyword_awake" if keyword_awake else "off"),
+    )
+    if cfg.policy_enabled and not keyword_awake and not grace:
         addressee = conversation.manager.addressee(group_key, bot_names=cfg.keywords)
         relevant = conversation.manager.topic_relevant(group_key)
         policy = participation.decide(
@@ -231,8 +275,10 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
             policy.reason,
         )
 
-    policy_pass = policy.action == participation.ACTION_PASS
-    force = keyword_awake or policy.action == participation.ACTION_REPLY
+    policy_pass = not grace and policy.action == participation.ACTION_PASS
+    force = (
+        keyword_awake or grace or policy.action == participation.ACTION_REPLY
+    )
     if (
         not force
         and not policy_pass

@@ -31,6 +31,7 @@ def cfg(**overrides: object) -> SimpleNamespace:
         "group_presence_rate": 0.2,
         "group_presence_window_sec": 600,
         "group_presence_rate_in_window": 2.0,
+        "group_presence_active_grace_sec": 180,
         "group_presence_reply_cooldown_sec": 15,
         "group_presence_wake_cooldown_sec": 300,
         "group_presence_daily_active": 120,
@@ -1014,7 +1015,11 @@ async def test_autotrigger_judge_pass_keeps_silent(monkeypatch) -> None:
 
     monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
     judge = _fake_judge("pass")
-    config = cfg(group_presence_rate=1, group_presence_judge_enabled=True)
+    config = cfg(
+        group_presence_rate=1,
+        group_presence_judge_enabled=True,
+        group_presence_active_grace_sec=0,
+    )
     first = await autotrigger.maybe_autotrigger(
         object(),
         fake_event(Seg("text", {"text": "在吗"})),
@@ -1048,7 +1053,11 @@ async def test_autotrigger_judge_sleep_closes_window(monkeypatch) -> None:
         await incoming.reply.text("在")
 
     monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
-    config = cfg(group_presence_rate=1, group_presence_judge_enabled=True)
+    config = cfg(
+        group_presence_rate=1,
+        group_presence_judge_enabled=True,
+        group_presence_active_grace_sec=0,
+    )
     await autotrigger.maybe_autotrigger(
         object(),
         fake_event(Seg("text", {"text": "在吗"})),
@@ -1281,3 +1290,157 @@ def test_passive_at_resets_pass_count(manager: PresenceManager) -> None:
     for index in range(2):
         manager.note_pass("g1", config=config, now=7.0 + index)
     assert manager.state_of("g1", now=10.0) is PresenceState.AWAKE
+
+
+def test_active_grace_covers_first_three_minutes(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_rate=0.0))
+    decision = manager.open_window("g1", config=config, now=100.0)
+    assert decision.action is Action.WAKE
+    assert manager.in_active_grace("g1", config=config, now=100.0)
+    assert manager.in_active_grace("g1", config=config, now=279.9)
+    assert not manager.in_active_grace("g1", config=config, now=280.0)
+    manager._close("g1", manager._groups["g1"], "test", config, 281.0)
+    assert not manager.in_active_grace("g1", config=config, now=281.0)
+
+
+@pytest.mark.asyncio
+async def test_autotrigger_replies_during_active_grace(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        await incoming.reply.text("在")
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    conversation.manager.reset()
+    config = cfg(group_presence_rate=0.0, group_presence_active_grace_sec=180)
+
+    # 叫名字开窗（CALL 路径），随后 10 秒内一条完全无关的消息也应回复
+    presence.manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config_from(config),
+        now=0.0,
+    )
+    conversation.manager.observe(
+        group_key="g1",
+        user_key="u1",
+        name="隐身人",
+        text="token 来！token 来！",
+        message_id="m1",
+        at=10.0,
+    )
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "token 来！token 来！"})),
+        config=config,
+        incoming=fake_incoming("token 来！token 来！", message_id="m1"),
+        now=10.0,
+        roll=0.99,
+        send_text=_collect(sent),
+    )
+    assert ok is True
+    assert sent == ["在"]
+
+    # 3 分钟之后回到策略：同一条无关消息被 PASS，不再回复
+    conversation.manager.observe(
+        group_key="g1",
+        user_key="u1",
+        name="隐身人",
+        text="token 来！token 来！",
+        message_id="m2",
+        at=200.0,
+    )
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "token 来！token 来！"})),
+        config=config,
+        incoming=fake_incoming("token 来！token 来！", message_id="m2"),
+        now=200.0,
+        roll=0.99,
+        send_text=_collect(sent),
+    )
+    assert ok is False
+    assert sent == ["在"]
+
+
+@pytest.mark.asyncio
+async def test_active_grace_still_exits_on_mention_other(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        await incoming.reply.text("在")
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    conversation.manager.reset()
+    config = cfg(group_presence_rate=0.0, group_presence_active_grace_sec=180)
+    presence.manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config_from(config),
+        now=0.0,
+    )
+    conversation.manager.observe(
+        group_key="g1",
+        user_key="u1",
+        name="小明",
+        text="你昨天那把太菜了",
+        message_id="m1",
+        mentions=("u2",),
+        at=10.0,
+    )
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "你昨天那把太菜了"})),
+        config=config,
+        incoming=fake_incoming("你昨天那把太菜了", message_id="m1"),
+        now=10.0,
+        roll=0.99,
+        send_text=_collect(sent),
+    )
+    assert ok is False
+    assert sent == []
+    assert presence.manager.state_of("g1", now=10.0) is PresenceState.SLEEPING
+
+
+@pytest.mark.asyncio
+async def test_active_grace_honors_explicit_mute(monkeypatch) -> None:
+    sent: list[str] = []
+
+    async def fake_run_turn(incoming, config):  # noqa: ARG001
+        await incoming.reply.text("在")
+
+    monkeypatch.setattr(autotrigger, "run_turn", fake_run_turn)
+    conversation.manager.reset()
+    config = cfg(group_presence_rate=0.0, group_presence_active_grace_sec=180)
+    presence.manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config_from(config),
+        now=0.0,
+    )
+    conversation.manager.observe(
+        group_key="g1",
+        user_key="u1",
+        name="小明",
+        text="闭嘴",
+        message_id="m1",
+        at=10.0,
+    )
+    ok = await autotrigger.maybe_autotrigger(
+        object(),
+        fake_event(Seg("text", {"text": "闭嘴"})),
+        config=config,
+        incoming=fake_incoming("闭嘴", message_id="m1"),
+        now=10.0,
+        roll=0.99,
+        send_text=_collect(sent),
+    )
+    assert ok is False
+    assert sent == []
+    assert presence.manager.state_of("g1", now=10.0) is PresenceState.MUTED

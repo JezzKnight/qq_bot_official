@@ -100,6 +100,7 @@ class PresenceConfig:
     rate: float = 0.2
     window_sec: float = 600.0
     rate_in_window: float = 2.0
+    active_grace_sec: float = 180.0
     reply_cooldown_sec: float = 45.0
     wake_cooldown_sec: float = 300.0
     daily_active: int = 120
@@ -164,6 +165,7 @@ class GroupPresence:
     hook_until: float = 0.0
     hook_used: bool = False
     pass_count: int = 0
+    awake_since: float = 0.0
 
     def reset_day(self, today: str) -> None:
         if self.day != today:
@@ -310,10 +312,12 @@ class PresenceManager:
             # 叫名字 = 明确被叫；进场，退出交给窗口内判定，窗口时长兜底。
             group.state = PresenceState.AWAKE
             group.expires_at = now + config.window_sec
+            group.awake_since = now
         else:
             # ABOUT 是「被提到」不是「被叫」，开短窗 + 回钩。
             group.state = PresenceState.AWAKE
             group.expires_at = now + config.keyword_window_sec
+            group.awake_since = now
             group.hook_until = now + config.hook_sec
             group.hook_used = False
         logger.info(
@@ -463,6 +467,7 @@ class PresenceManager:
             # 静默中的 @ 由 observe_passive 先解除静默；这里不抢
             return Decision(Action.NONE, "muted", group_key, group.state)
         group.state = PresenceState.AWAKE
+        group.awake_since = now
         group.expires_at = max(group.expires_at, now + config.window_sec)
         group.pass_count = 0
         group.wake_cooldown_until = 0.0
@@ -490,6 +495,7 @@ class PresenceManager:
         group = self._group(group_key, now)
         group.state = PresenceState.SLEEPING
         group.expires_at = 0.0
+        group.awake_since = 0.0
         if code == PROACTIVE_NO_PERMISSION:
             group.active_ok = False
             group.wake_cooldown_until = now + 300.0
@@ -509,6 +515,17 @@ class PresenceManager:
             group.failures,
             group.active_ok,
         )
+
+    def in_active_grace(
+        self, group_key: str, *, config: PresenceConfig, now: float
+    ) -> bool:
+        """唤醒后的活跃期：这段时间里的消息不过参与策略，直接接。"""
+        group = self._groups.get(group_key)
+        if group is None or group.state is not PresenceState.AWAKE:
+            return False
+        if config.active_grace_sec <= 0:
+            return False
+        return now - group.awake_since < config.active_grace_sec
 
     def state_of(self, group_key: str, *, now: float) -> PresenceState:
         """读取当前状态（测试/日志用，会先处理到期）。"""
@@ -567,6 +584,7 @@ class PresenceManager:
             return self._skip(event, group, "daily_cap")
         if force:
             group.state = PresenceState.AWAKE
+            group.awake_since = now
             group.expires_at = now + config.window_sec
             logger.info("presence forced wake group=%s", event.group_key)
             return Decision(
@@ -584,6 +602,7 @@ class PresenceManager:
         if draw >= threshold:
             return self._skip(event, group, "rate", roll=draw, threshold=threshold)
         group.state = PresenceState.AWAKE
+        group.awake_since = now
         group.expires_at = now + config.window_sec
         logger.info(
             "presence wake group=%s expires=%.0f threshold=%.3f",
@@ -754,6 +773,7 @@ def config_from(settings: Any) -> PresenceConfig:
         rate=float(get("group_presence_rate", 0.2)),
         window_sec=float(get("group_presence_window_sec", 600)),
         rate_in_window=float(get("group_presence_rate_in_window", 2.0)),
+        active_grace_sec=float(get("group_presence_active_grace_sec", 180)),
         reply_cooldown_sec=float(get("group_presence_reply_cooldown_sec", 45)),
         wake_cooldown_sec=float(get("group_presence_wake_cooldown_sec", 300)),
         daily_active=int(get("group_presence_daily_active", 120)),
