@@ -3,10 +3,10 @@
 | 文档 | 内容 |
 |---|---|
 | [`group-presence.md`](group-presence.md) | 群聊存在感（Presence）与自动接话：状态机、0-1 抽奖、窗口、双冷却、静默、黑名单、可接性过滤、复读机、参数表、测试矩阵、迁移与分期 |
-| [`group-conversation.md`](group-conversation.md) | 群聊会话图：发言账本、指向解析、`[群聊状态]` 注入、参与策略（P1、P2 已实现） |
+| [`group-conversation.md`](group-conversation.md) | 群聊会话图：发言账本、指向解析、逐条身份标签、参与策略（P1、P2 已实现） |
 | [`state-machine.md`](state-machine.md) | 存在感状态机的 ASCII 图解：三态总图、三条入口管线、转移表、退出原因与参数快照 |
 
-当前进度：**v1.14，P1 + P2 + P3 均已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机 / 关键词三语境 + 回钩 / 窗口内三态判定）；群聊会话图 **P1 + P2** 已实现（发言账本 / 指向解析 / `[群聊状态]` 注入 / 参与策略）。
+当前进度：**v1.14，P1 + P2 + P3 均已实现**（状态机 / 抽奖 / 窗口 / 双冷却 / 静默 / 黑名单 / 可接性 / 复读机 / 关键词三语境 + 回钩 / 窗口内三态判定）；群聊会话图 **P1 + P2** 已实现（发言账本 / 指向解析 / 逐条 `<user identity>` 标签 / 参与策略）。
 
 版本变化：
 
@@ -33,3 +33,5 @@
 评审待定项见 [`group-presence.md` 第 14 节](group-presence.md#14-开放问题评审时定)。
 
 - 会话图 v3：P2 参与策略落地——`qq_bot/chat/participation.py` 在 judge 前接管明确场景（叫 bot 必回、@ 别人不插嘴、话题无关 PASS），模糊情况仍交回 presence；`GROUP_PRESENCE_POLICY_ENABLED` 可整体回退。
+
+- 会话图 v4：移除 `[群聊状态]` 注入；群历史改为逐条 `<user identity name="..."/>` 前缀（`qq_bot/chat/turn.py::_annotate_history`），归属更准，`GROUP_CONVERSATION_*` 只保留总开关。

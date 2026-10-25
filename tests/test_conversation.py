@@ -7,11 +7,7 @@ import time
 import pytest
 
 from qq_bot.chat import conversation
-
-TIMES = "\u00d7"
-
 from qq_bot.chat.conversation import (
-    Addressee,
     ConversationManager,
     GroupConversation,
     MessageNode,
@@ -140,54 +136,10 @@ def test_no_signal_is_group() -> None:
     assert addressee.score == 0.2
 
 
-def test_render_caps_speakers_and_phrases() -> None:
-    conv = GroupConversation()
-    conv.bot_id = "bot"
-    for user in range(6):
-        for phrase in range(4):
-            conv.observe(
-                node(
-                    f"m{user}-{phrase}",
-                    f"u{user}",
-                    f"词{phrase}",
-                    at=100.0 + user * 10 + phrase,
-                    name=f"人{user}",
-                )
-            )
-
-    text = conv.render(
-        conv.nodes[-1],
-        Addressee("group", 0.2, ("无明确指向",)),
-        now=200.0,
-        max_speakers=5,
-        max_phrases=3,
-    )
-
-    assert "人0" not in text
-    assert text.count(TIMES) == 20
-
-
-def test_render_respects_token_budget() -> None:
-    conv = GroupConversation()
-    conv.bot_id = "bot"
-    conv.observe(node("m1", "u1", "一个很长很长很长的重复句子", at=100.0, name="小明"))
-
-    text = conv.render(
-        conv.nodes[-1],
-        Addressee("bot", 1.0, ("@bot",)),
-        now=101.0,
-        block_tokens=20,
-    )
-
-    assert "（" not in text
-    assert f"小明{TIMES}1" in text
-
-
 def test_empty_conversation_is_safe() -> None:
     manager = ConversationManager()
     manager.note_bot("missing", "没人", at=time.monotonic())
 
-    assert manager.block("missing") == ""
     assert manager.addressee("missing") is None
 
 
@@ -203,8 +155,8 @@ def test_manager_evicts_oldest_group() -> None:
             at=100.0,
         )
 
-    assert manager.block("g1") == ""
-    assert manager.block("g3") != ""
+    assert manager.addressee("g1") is None
+    assert manager.addressee("g3") is not None
 
 
 def test_replay_insult_scene() -> None:
@@ -231,12 +183,9 @@ def test_replay_insult_scene() -> None:
 
     assert manager.count_of("g1", "a", "fw") == 3
     assert manager.count_of("g1", "b", "废物") == 2
-
-    text = manager.block("g1", now=120.0)
-    assert f"隐身人{TIMES}3" in text
-    assert f"fw{TIMES}3" in text
-    assert f"AMelax{TIMES}2" in text
-    assert "本条指向：bot" in text
+    addressee = manager.addressee("g1")
+    assert addressee is not None
+    assert addressee.target == "bot"
 
 
 def test_parse_bot_names() -> None:

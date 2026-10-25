@@ -18,10 +18,6 @@ from qq_bot.chat.relevance import KeywordKind, fast_kind, find_keyword
 MAX_GROUPS = 512
 DEFAULT_WINDOW_SEC = 600.0
 DEFAULT_MAX_MESSAGES = 30
-DEFAULT_BLOCK_TOKENS = 80
-DEFAULT_MAX_SPEAKERS = 5
-DEFAULT_MAX_PHRASES = 3
-DEFAULT_TOPIC_WINDOW_SEC = 600.0
 DEFAULT_BOT_NAMES: tuple[str, ...] = ("大肥鱼",)
 UNKNOWN_NAME = "有人"
 BOT_TARGET = "bot"
@@ -32,8 +28,6 @@ _SECOND_PERSON = ("你", "你们")
 _QUESTION_ENDINGS = ("吗", "呢", "?", "？")
 _MAX_PHRASE_CHARS = 16
 _MIN_PAIR_CHARS = 2
-_TIMES = "\u00d7"
-
 
 def normalize_text(text: str) -> str:
     """全角转半角、小写、压缩空白；账本与匹配都用这个口径。"""
@@ -238,78 +232,6 @@ class GroupConversation:
         score, _, target, evidence = max(candidates, key=lambda row: (row[0], -row[1]))
         return Addressee(target, score, evidence)
 
-    def render(  # noqa: PLR0913
-        self,
-        node: MessageNode,
-        addressee: Addressee,
-        *,
-        now: float,
-        window_sec: float = DEFAULT_WINDOW_SEC,
-        max_speakers: int = DEFAULT_MAX_SPEAKERS,
-        max_phrases: int = DEFAULT_MAX_PHRASES,
-        block_tokens: int = DEFAULT_BLOCK_TOKENS,
-    ) -> str:
-        stats = [
-            stat
-            for stat in self.ledger.stats(window_sec, now)
-            if stat.user_id != self.bot_id
-        ]
-        who = self.prev_speaker(node)[1] or "没人"
-        target = self._target_name(addressee.target)
-        evidence = "、".join(addressee.evidence) or "无"
-        speakers = _speaker_summary(stats, max_speakers, max_phrases)
-        head = "[群聊状态] 最近 10 分钟：" + speakers
-        text = (
-            head
-            + "；上一句是 "
-            + who
-            + " 说的；本条指向："
-            + target
-            + "（依据："
-            + evidence
-            + "）"
-        )
-        if len(text) <= block_tokens * 3:
-            return text
-        plain = "、".join(
-            f"{stat.name}{_TIMES}{stat.count}" for stat in stats[:max_speakers]
-        )
-        return (
-            "[群聊状态] 最近 10 分钟："
-            + (plain or "暂无")
-            + "；上一句是 "
-            + who
-            + " 说的；本条指向："
-            + target
-        )
-
-    def _target_name(self, target: str) -> str:
-        if target == BOT_TARGET:
-            return "bot"
-        if target == GROUP_TARGET:
-            return "群里"
-        return self.ledger.name_of(target) or "某人"
-
-
-def _speaker_summary(
-    stats: list[SpeakerStat], max_speakers: int, max_phrases: int
-) -> str:
-    rows = [_format_speaker(stat, max_phrases) for stat in stats[:max_speakers]]
-    return "、".join(rows) if rows else "暂无"
-
-
-def _format_speaker(stat: SpeakerStat, max_phrases: int) -> str:
-    phrases = [
-        (text, count)
-        for text, count in stat.texts.most_common(max_phrases)
-        if len(text) <= _MAX_PHRASE_CHARS
-    ]
-    if not phrases:
-        return f"{stat.name}{_TIMES}{stat.count}"
-    detail = "、".join(f"{text}{_TIMES}{count}" for text, count in phrases)
-    return f"{stat.name}{_TIMES}{stat.count}（{detail}）"
-
-
 def _alternating_partner(
     node: MessageNode,
     recent: list[MessageNode],
@@ -422,37 +344,7 @@ class ConversationManager:
             conversation.nodes[-1], window=window, min_overlap=min_overlap
         )
 
-    def block(  # noqa: PLR0913
-        self,
-        group_key: str,
-        *,
-        bot_names: tuple[str, ...] = DEFAULT_BOT_NAMES,
-        window_sec: float = DEFAULT_WINDOW_SEC,
-        max_speakers: int = DEFAULT_MAX_SPEAKERS,
-        max_phrases: int = DEFAULT_MAX_PHRASES,
-        block_tokens: int = DEFAULT_BLOCK_TOKENS,
-        now: float | None = None,
-    ) -> str:
-        conversation = self._groups.get(group_key)
-        if conversation is None or not conversation.nodes:
-            return ""
-        node = conversation.nodes[-1]
-        addressee = conversation.resolve(node, bot_names=bot_names)
-        return conversation.render(
-            node,
-            addressee,
-            now=time.monotonic() if now is None else now,
-            window_sec=window_sec,
-            max_speakers=max_speakers,
-            max_phrases=max_phrases,
-            block_tokens=block_tokens,
-        )
-
-    def reset(self, group_key: str | None = None) -> None:
-        if group_key is None:
-            self._groups.clear()
-        else:
-            self._groups.pop(group_key, None)
-
+    def reset(self) -> None:
+        self._groups.clear()
 
 manager = ConversationManager()

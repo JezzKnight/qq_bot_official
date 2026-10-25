@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -14,8 +15,6 @@ from zoneinfo import ZoneInfo
 from prompts.service import prompt_service
 from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
-from qq_bot.chat.conversation import manager as conversation_manager
-from qq_bot.chat.conversation import parse_bot_names
 from qq_bot.chat.persist import persist_turn, persist_user
 from qq_bot.chat.prompt import SystemPromptParts, build_system_prompt
 from qq_bot.chat.session_lock import group_session_key, session_lock
@@ -136,6 +135,31 @@ async def _reply_video_ack(reply: Any) -> None:
             logger.exception("视频处理提示发送失败，后台任务继续")
 
 
+
+def _annotate_history(history: list[ChatMessage]) -> list[ChatMessage]:
+    """给群历史里的用户消息补发送者标签。
+
+    只影响拼给模型的 prompt，不落库；兼容已被标注过的旧数据。
+    """
+    annotated: list[ChatMessage] = []
+    for message in history:
+        if (
+            message.role != "user"
+            or not message.content
+            or message.content.startswith("<user identity")
+        ):
+            annotated.append(message)
+            continue
+        name = escape_for_prompt(message.sender_name or "某成员")
+        annotated.append(
+            replace(
+                message,
+                content=f'<user identity name="{name}"/>\n{message.content}',
+            )
+        )
+    return annotated
+
+
 async def run_turn(incoming: Incoming, *, config: Any) -> str:
     """执行一轮对话；同一会话内串行，避免两轮回复的分段消息在群里交叉。"""
     async with session_lock(group_session_key(incoming.group_key, incoming.user_key)):
@@ -210,17 +234,6 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
             except Exception as exc:  # noqa: BLE001 —— 注入失败只降级
                 logger.warning("私聊记忆注入失败，降级为不注入: %s", type(exc).__name__)
 
-    state_block = ""
-    if is_group and getattr(config, "group_conversation_enabled", False):
-        state_block = conversation_manager.block(
-            gid,
-            bot_names=parse_bot_names(config.group_presence_keywords),
-            window_sec=config.group_conversation_window_sec,
-            max_speakers=config.group_conversation_max_speakers,
-            max_phrases=config.group_conversation_max_phrases,
-            block_tokens=config.group_conversation_block_tokens,
-        )
-
     sticker_catalog = catalog_text() or ""
     now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y年%m月%d日 %H:%M:%S")
     final_prompt = build_system_prompt(
@@ -237,7 +250,6 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 f'当前发言人: uid="{uid}", name="{sender_name}"'
                 + (f"\n{incoming.hint}" if incoming.hint else "")
             ),
-            state=state_block,
             memory=(
                 f"以下是本轮对话动态注入的长期记忆：\n{memory_prompt}"
                 if memory_prompt
@@ -247,8 +259,11 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         )
     )
 
+    history = parts.as_history()
+    if is_group:
+        history = _annotate_history(history)
     messages = [ChatMessage(role="system", content=final_prompt)]
-    messages.extend(parts.as_history())
+    messages.extend(history)
 
     images = await _download_images(incoming)
     current_images.set(images)

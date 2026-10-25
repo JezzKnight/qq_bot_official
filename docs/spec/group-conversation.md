@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | v3（P2 已落地） |
+| 版本 | v4（移除 [群聊状态]，历史改标签） |
 | 日期 | 2026-10-25 |
-| 状态 | P1、P2 已实现（全量 276 passed） |
+| 状态 | P1、P2 已实现；`[群聊状态]` 注入已移除（全量 277 passed） |
 | 前置 | [`group-presence.md`](group-presence.md) v1.14（状态机 / 窗口 / judge） |
 | 关联 | `qq_bot/chat/presence.py`、`qq_bot/chat/autotrigger.py`、`qq_bot/chat/turn.py` |
 
@@ -177,9 +177,12 @@ class Addressee:
   但不跳过静默、黑名单、日上限、重复消息。
 - `GROUP_PRESENCE_POLICY_ENABLED=false` 可整体退回 P3 行为（纯 judge/0-1）。
 
-## 7. Prompt 注入：`[群聊状态]`
+## 7. ~~Prompt 注入：`[群聊状态]`~~（v4 已移除）
 
-### 7.1 格式
+> v4 决定：不再把聚合状态写进 prompt。归属改为在历史消息正文里逐条标
+> `<user identity name="小明"/>`，见 §7.4。
+
+### 7.1 格式（历史）
 
 ```
 [群聊状态] 最近 10 分钟：隐身人×3（fw×3）、AMelax×2（废物×2）;
@@ -199,14 +202,29 @@ class Addressee:
 
 只加一句通用规则，不做场景分支：
 
-> 涉及「谁说的 / 几次 / 几个人」时，以 `[群聊状态]` 为准，不要自己数。
+> （v4 起不再注入；归属改由 §7.4 的逐条标签承担。）
+
+### 7.4 逐条身份标签（v4 起）
+
+`qq_bot/chat/turn.py` 的 `_annotate_history` 在拼 prompt 时给群历史里的
+`role=user` 消息加前缀，**不落库**：
+
+```
+<user identity name="小明"/>
+我钓了条三斤的
+```
+
+- `sender_name` 为空时用「某成员」；
+- 已经带标签的旧数据不重复加；
+- assistant/tool 消息不加；
+- 与旧项目 `qq_bot` 的 `<user identity id=.../>` 同源，但只做渲染、不污染库。
 
 ## 8. 接入点
 
 | 文件 | 改动 |
 |---|---|
 | `qq_bot/plugins/qqbot_official/__init__.py` | `_dispatch` 与非 @ 分支里对每条群消息调 `conversation.observe(...)` |
-| `qq_bot/chat/turn.py` | 群聊拼 prompt 时注入 `[群聊状态]` |
+| `qq_bot/chat/turn.py` | 群聊拼 prompt 时给历史用户消息加 `<user identity>` 标签 |
 | `qq_bot/services/config.py` | 7 个 `group_conversation_*` + `group_presence_policy_enabled` |
 | 新文件 | `qq_bot/chat/conversation.py`、`qq_bot/chat/participation.py` |
 
@@ -222,12 +240,6 @@ class Addressee:
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `GROUP_CONVERSATION_ENABLED` | `true` | 总开关 |
-| `GROUP_CONVERSATION_WINDOW_SEC` | `600` | 账本统计窗口 |
-| `GROUP_CONVERSATION_MAX_MESSAGES` | `30` | 环形缓冲条数 |
-| `GROUP_CONVERSATION_BLOCK_TOKENS` | `80` | `[群聊状态]` 预算 |
-| `GROUP_CONVERSATION_MAX_SPEAKERS` | `5` | 最多列几个发言人 |
-| `GROUP_CONVERSATION_MAX_PHRASES` | `3` | 每人最多列几个高频文本 |
-| `GROUP_CONVERSATION_TOPIC_WINDOW_SEC` | `600` | 话题词窗口 |
 | `GROUP_PRESENCE_POLICY_ENABLED` | `true` | 参与策略总开关（P2） |
 
 ## 11. 测试
@@ -245,7 +257,6 @@ class Addressee:
 | 7 | @小明 → target 为小明，不是 bot |
 | 8 | A↔B 交替 3 条 → 当前 A 指向 B |
 | 9 | 无信号 → group 0.2 |
-| 10 | `[群聊状态]` 格式与截断（>5 人、>3 词） |
 | 11 | 空会话 / 只有 bot 消息时不抛异常 |
 | 12 | 超过 `MAX_GROUPS` 时最旧的群被淘汰 |
 | 13 | 策略：指向 bot 1.0 → REPLY；0.75 → 交回 presence |
@@ -259,13 +270,13 @@ class Addressee:
 
 - 断言隐身人 `fw` = 3、AMelax `废物` = 2，且不合并；
 - 断言第五条消息 `target == "bot"`；
-- 断言注入块包含两个名字与各自次数。
+- 断言账本计数与指向解析正确（v4 起不再有注入块）。
 
 ## 12. 分阶段
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| P1 | `conversation.py`、`[群聊状态]` 注入、测试 | 已实现 |
+| P1 | `conversation.py`、指向解析、测试（`[群聊状态]` 注入已于 v4 移除） | 已实现 |
 | P2 | `ParticipationPolicy` 接管明确场景；回复目标按 Addressee 决定 @ 谁 | 已实现（策略部分；@ 选择未做） |
 | P3 | 重启重建、指标、按群调参 | 未开始 |
 
@@ -274,7 +285,7 @@ class Addressee:
 - `qq_bot/chat/conversation.py`：`MessageNode` / `SpeakerLedger` / `Addressee` /
   `GroupConversation` / `ConversationManager`，含 `normalize_text`、
   `topic_tokens`、`parse_bot_names`。
-- `qq_bot/chat/turn.py`：群聊 `SystemPromptParts.state` 注入 `[群聊状态]`。
+- `qq_bot/chat/turn.py`：`_annotate_history` 给群历史用户消息加 `<user identity name="..."/>` 前缀（只渲染，不落库）。
 - `qq_bot/plugins/qqbot_official/__init__.py`：@ 与非 @ 两条路径都调
   `conversation.manager.observe`；被动回复/主动接话成功后 `note_bot`。
 - `qq_bot/chat/prompt.py`：`SystemPromptParts` 新增 `state` 字段（排在

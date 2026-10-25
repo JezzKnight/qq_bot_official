@@ -12,12 +12,11 @@ def test_order_is_fixed() -> None:
         sticker="K",
         summary="U",
         speaker="P",
-        state="X",
         memory="M",
         time="T",
     )
     assert build_system_prompt(parts) == (
-        "S\n\nG\n\nK\n\nU\n\nP\n\nX\n\nM\n\nT"
+        "S\n\nG\n\nK\n\nU\n\nP\n\nM\n\nT"
     )
 
 
@@ -28,7 +27,6 @@ def test_empty_segments_are_skipped() -> None:
         sticker="",
         summary="",
         speaker="P",
-        state="",
         memory="",
         time="T",
     )

@@ -67,14 +67,8 @@ class AiChatConfig(BaseModel):
     group_presence_judge_context_messages: int = 8  # 判定时参考的最近群消息条数
     group_presence_pass_limit: int = 3  # 连续 pass 达到该次数自动退场
 
-    # ── 群聊会话图（把归属/指向算好，注入 [群聊状态]）──
-    group_conversation_enabled: bool = True  # 总开关；关掉后不注入
-    group_conversation_window_sec: int = 600  # 发言账本统计窗口
-    group_conversation_max_messages: int = 30  # 每群环形缓冲条数
-    group_conversation_block_tokens: int = 80  # [群聊状态] token 预算
-    group_conversation_max_speakers: int = 5  # 最多列几个发言人
-    group_conversation_max_phrases: int = 3  # 每人最多列几个高频文本
-    group_conversation_topic_window_sec: int = 600  # 话题词窗口
+    # ── 群聊会话图（只供参与策略取「指向/话题相关」，不注入 prompt）──
+    group_conversation_enabled: bool = True  # 会话图总开关；供参与策略取指向
 
     # ── WebSearch配置 ──
     Tavily_key: list[str] = []
