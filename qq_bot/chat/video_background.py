@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 VIDEO_ACK = "我去看看这个视频 稍等一下"
-MAX_VIDEO_NOTE_CHARS = 6000
 
 _active_jobs: dict[tuple[int, str], asyncio.Task[None]] = {}
 
@@ -107,7 +106,7 @@ async def _run_video_job(job: VideoJob) -> None:
                 note_store=await get_memory(),
             )
             insight = await agent.analyze(job.source, question=job.question)
-            note = (insight.text or "").strip()[:MAX_VIDEO_NOTE_CHARS]
+            note = (insight.text or "").strip()
             answer = await _answer(job, note)
     except asyncio.CancelledError:
         raise

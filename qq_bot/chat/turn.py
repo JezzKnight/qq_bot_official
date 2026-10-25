@@ -73,7 +73,6 @@ def _compression_scheduler(incoming: Incoming):
 
 MAX_TOOL_ROUNDS = 5
 TOOL_TRACE_CHARS = 800
-MAX_VIDEO_NOTE_CHARS = 1600
 FALLBACK_TEXT = "AI暂时无法响应，请稍后重试"
 
 
@@ -488,8 +487,6 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     pending_sticker = current_pending_sticker.get()
     current_pending_sticker.set(None)
     video_note = "\n\n".join(video_notes)
-    if len(video_note) > MAX_VIDEO_NOTE_CHARS:
-        video_note = video_note[:MAX_VIDEO_NOTE_CHARS] + "…"
     if video_note:
         logger.info("TURN video note chars=%d", len(video_note))
     logger.info("TURN persist start")

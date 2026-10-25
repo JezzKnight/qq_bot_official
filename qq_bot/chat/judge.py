@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 JUDGE_MODEL = "deepseek-v41-flash"
 JUDGE_TIMEOUT_SEC = 1.5
-JUDGE_MAX_CHARS = 200
+JUDGE_MAX_CHARS = 500
 
 _SYSTEM = (
     "你在一个 QQ 群里，刚接过话。现在判断下面这条群消息要不要接。\n"
