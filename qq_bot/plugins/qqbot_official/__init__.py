@@ -152,10 +152,10 @@ async def _rebuild_conversation(group_key: str) -> None:
 
 async def _observe_conversation(
     bot: Bot, event: QQMessageEvent, incoming: Incoming, config: AiChatConfig
-) -> None:
-    """把群消息喂给会话图；本群首次出现时先从数据库回填。"""
+) -> bool:
+    """把群消息喂给会话图；本群首次出现时先从数据库回填。返回是否 @ 了 bot。"""
     if not incoming.group_key or not config.group_conversation_enabled:
-        return
+        return False
     bot_id = str(getattr(bot, "self_id", "") or "")
     if bot_id:
         conversation.manager.bind_bot(bot_id)
@@ -173,17 +173,28 @@ async def _observe_conversation(
         mention_bot=mention_bot,
         at=time.monotonic(),
     )
+    return mention_bot
 
 
 async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
     incoming = qq_from_event(event, reply=QQReply(bot, event))
+    config = get_plugin_config(AiChatConfig)
+    mention_bot = False
+    if incoming.group_key:
+        mention_bot = await _observe_conversation(bot, event, incoming, config)
     if not incoming.text and not incoming.images:
+        if incoming.group_key and mention_bot:
+            # 空 @ 也是一次明确呼叫：先把在场窗口打开
+            presence.manager.open_window(
+                incoming.group_key,
+                config=presence.config_from(config),
+                now=time.monotonic(),
+                reason="passive_empty",
+            )
         await bot.send(event, MessageSegment.text("你发了个空消息 我没看懂"))
         return
 
-    config = get_plugin_config(AiChatConfig)
     if incoming.group_key:
-        await _observe_conversation(bot, event, incoming, config)
         # 登记被动窗口：@ 这一轮按最保守口径记账（假设 4 段已用满）。
         passive_window.register(
             incoming.group_key,
@@ -212,10 +223,14 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
         await bot.send(event, MessageSegment.text("我这边卡了一下 稍后再试"))
     else:
         if incoming.group_key:
-            presence.manager.note_passive(incoming.group_key, now=time.monotonic())
-            conversation.manager.note_bot(
-                incoming.group_key, body or "", at=time.monotonic()
+            now = time.monotonic()
+            presence.manager.note_passive(incoming.group_key, now=now)
+            presence.manager.open_window(
+                incoming.group_key,
+                config=presence.config_from(config),
+                now=now,
             )
+            conversation.manager.note_bot(incoming.group_key, body or "", at=now)
 
 
 async def _record_full_message(

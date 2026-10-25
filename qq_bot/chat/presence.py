@@ -447,6 +447,33 @@ class PresenceManager:
         group = self._group(group_key, now)
         self._close(group_key, group, reason, config, now)
 
+    def open_window(
+        self,
+        group_key: str,
+        *,
+        config: PresenceConfig,
+        now: float,
+        reason: str = "passive",
+    ) -> Decision:
+        """被 @ 后进入 AWAKE；重复 @ 只顺延窗口，不缩短。"""
+        group = self._group(group_key, now)
+        if not config.enabled:
+            return Decision(Action.NONE, "disabled", group_key, group.state)
+        if group.state is PresenceState.MUTED:
+            # 静默中的 @ 由 observe_passive 先解除静默；这里不抢
+            return Decision(Action.NONE, "muted", group_key, group.state)
+        group.state = PresenceState.AWAKE
+        group.expires_at = max(group.expires_at, now + config.window_sec)
+        group.pass_count = 0
+        group.wake_cooldown_until = 0.0
+        logger.info(
+            "presence wake group=%s reason=%s until=%.0f",
+            group_key,
+            reason,
+            group.expires_at,
+        )
+        return Decision(Action.WAKE, reason, group_key, group.state)
+
     def note_passive(self, group_key: str, *, now: float) -> None:
         """被动回复发出后只更新「上次说话时间」，不占日额度。"""
         group = self._group(group_key, now)

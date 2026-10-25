@@ -1211,3 +1211,73 @@ def test_policy_pass_does_not_close_window(manager: PresenceManager) -> None:
         )
         assert decision.reason == "policy_pass"
     assert manager.state_of("g1", now=30.0) is PresenceState.AWAKE
+
+
+def test_passive_at_opens_window(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    decision = manager.open_window("g1", config=config, now=0.0)
+    assert decision.action is Action.WAKE
+    assert manager.state_of("g1", now=0.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=599.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=601.0) is PresenceState.SLEEPING
+
+
+def test_passive_at_refreshes_window(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    manager.open_window("g1", config=config, now=0.0)
+    manager.open_window("g1", config=config, now=100.0)
+    assert manager.state_of("g1", now=699.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=701.0) is PresenceState.SLEEPING
+
+
+def test_passive_at_opens_window_after_unmute(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="闭嘴",
+        message_id="m1",
+        config=config,
+        now=0.0,
+    )
+    # 静默中 @：先由 observe_passive 解除静默
+    unmute = manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="大肥鱼在吗",
+        message_id="m2",
+        config=config,
+        now=10.0,
+    )
+    assert unmute.action is Action.UNMUTE
+    decision = manager.open_window("g1", config=config, now=10.0)
+    assert decision.action is Action.WAKE
+    assert manager.state_of("g1", now=20.0) is PresenceState.AWAKE
+
+
+def test_passive_at_waits_out_mute(manager: PresenceManager) -> None:
+    config = config_from(cfg())
+    manager.observe_passive(
+        group_key="g1",
+        user_key="u1",
+        text="闭嘴",
+        message_id="m1",
+        config=config,
+        now=0.0,
+    )
+    decision = manager.open_window("g1", config=config, now=1.0)
+    assert decision.action is Action.NONE
+    assert decision.reason == "muted"
+    assert manager.state_of("g1", now=2.0) is PresenceState.MUTED
+
+
+def test_passive_at_resets_pass_count(manager: PresenceManager) -> None:
+    config = config_from(cfg(group_presence_pass_limit=3))
+    manager.open_window("g1", config=config, now=0.0)
+    for index in range(2):
+        manager.note_pass("g1", config=config, now=1.0 + index)
+    assert manager.state_of("g1", now=5.0) is PresenceState.AWAKE
+    manager.open_window("g1", config=config, now=6.0)
+    for index in range(2):
+        manager.note_pass("g1", config=config, now=7.0 + index)
+    assert manager.state_of("g1", now=10.0) is PresenceState.AWAKE
