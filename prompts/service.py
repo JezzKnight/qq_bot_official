@@ -103,6 +103,11 @@ class PromptService:
         template = self._loader.load("chat/group.md")
         return self._renderer.render(template, **variables)
 
+    def get_query_prompt(self, **variables: str) -> str:
+        """查询/攻略模式提示词（chat/query.md），按需追加。"""
+        template = self._loader.load("chat/query.md")
+        return self._renderer.render(template, **variables)
+
     def get_agent_prompt(self, agent_name: str, **variables: str) -> str:
         """子 Agent 提示词（agents/{agent_name}.md）。"""
         template = self._loader.load(f"agents/{agent_name}.md")

@@ -14,9 +14,10 @@ def test_order_is_fixed() -> None:
         speaker="P",
         memory="M",
         time="T",
+        mode="Q",
     )
     assert build_system_prompt(parts) == (
-        "S\n\nG\n\nK\n\nU\n\nP\n\nM\n\nT"
+        "S\n\nG\n\nQ\n\nK\n\nU\n\nP\n\nM\n\nT"
     )
 
 

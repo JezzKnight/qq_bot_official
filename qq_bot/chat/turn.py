@@ -17,6 +17,7 @@ from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
 from qq_bot.chat.persist import persist_turn, persist_user
 from qq_bot.chat.prompt import SystemPromptParts, build_system_prompt
+from qq_bot.chat.query_mode import is_query_question
 from qq_bot.chat.session_lock import group_session_key, session_lock
 from qq_bot.chat.video_background import (
     VIDEO_ACK,
@@ -212,6 +213,10 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         )
 
     system_part = prompt_service.get_system_prompt()
+    mode_part = ""
+    if is_query_question(incoming.text):
+        mode_part = prompt_service.get_query_prompt()
+        logger.info("TURN query mode uid=%s", uid)
     if is_group:
         member_info = await members_xml(memory, gid) if memory is not None else None
         if not member_info:
@@ -243,6 +248,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         SystemPromptParts(
             system=system_part,
             group=group_part,
+            mode=mode_part,
             sticker=sticker_catalog,
             summary=(
                 f"## 群聊摘要（更早的对话，仅供参考）\n{parts.summary}"

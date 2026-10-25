@@ -16,6 +16,7 @@ class SystemPromptParts:
     speaker: str
     memory: str
     time: str
+    mode: str = ""
 
 
 def build_system_prompt(parts: SystemPromptParts) -> str:
@@ -25,6 +26,7 @@ def build_system_prompt(parts: SystemPromptParts) -> str:
         for chunk in (
             parts.system,
             parts.group,
+            parts.mode,
             parts.sticker,
             parts.summary,
             parts.speaker,
