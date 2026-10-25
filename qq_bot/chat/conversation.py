@@ -31,6 +31,8 @@ GROUP_TARGET = "group"
 
 _WHITESPACE = re.compile(r"\s+")
 _SECOND_PERSON = ("你", "你们")
+_FOLLOWUP_SEC = 120.0
+_QUESTION_WORDS = ("什么", "怎么", "为什么", "哪", "谁", "几", "多少", "吗", "呢")
 _QUESTION_ENDINGS = ("吗", "呢", "?", "？")
 _MAX_PHRASE_CHARS = 16
 _MIN_PAIR_CHARS = 2
@@ -252,6 +254,12 @@ class GroupConversation:
             candidates.append((0.75, 4, BOT_TARGET, ("「你」指 bot",)))
         if bot_prev and node.text.strip().endswith(_QUESTION_ENDINGS):
             candidates.append((0.60, 5, BOT_TARGET, ("bot 后的疑问",)))
+        if (
+            bot_prev
+            and node.at - self.last_bot_at <= _FOLLOWUP_SEC
+            and _followup_question(node)
+        ):
+            candidates.append((0.65, 5, BOT_TARGET, ("紧接着 bot 的追问",)))
 
         others = [uid for uid in node.mentions if uid != self.bot_id]
         if others:
@@ -265,6 +273,13 @@ class GroupConversation:
             return Addressee(GROUP_TARGET, 0.20, ("无明确指向",))
         score, _, target, evidence = max(candidates, key=lambda row: (row[0], -row[1]))
         return Addressee(target, score, evidence)
+
+def _followup_question(node: MessageNode) -> bool:
+    """bot 刚说完、这条又像在追问（疑问词/问号），默认是问 bot 的。"""
+    return any(word in node.text for word in _QUESTION_WORDS) or (
+        node.text.strip().endswith(("?", "？"))
+    )
+
 
 def _alternating_partner(
     node: MessageNode,

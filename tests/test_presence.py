@@ -1082,7 +1082,7 @@ def _fake_judge(action: str):
     return fake
 
 
-def test_policy_pass_accumulates_then_closes() -> None:
+def test_policy_pass_does_not_accumulate() -> None:
     config = config_from(cfg(group_presence_rate=1.0, group_presence_pass_limit=2))
     event = PresenceEvent(
         group_key="g1", user_key="u1", text="在吗", message_id="m1"
@@ -1090,7 +1090,7 @@ def test_policy_pass_accumulates_then_closes() -> None:
     first = presence.manager.observe_active(event, config=config, now=0.0, roll=0.0)
     assert first.state is PresenceState.AWAKE
 
-    for index in range(2):
+    for index in range(4):
         skip = presence.manager.observe_active(
             replace(event, message_id=f"p{index}"),
             config=config,
@@ -1098,7 +1098,8 @@ def test_policy_pass_accumulates_then_closes() -> None:
             policy_pass=True,
         )
         assert skip.action is Action.NONE
-    assert presence.manager.state_of("g1", now=10.0) is PresenceState.SLEEPING
+    # 策略 PASS 不再累计，窗口靠 judge PASS 或时长关闭
+    assert presence.manager.state_of("g1", now=10.0) is PresenceState.AWAKE
 
 
 def test_forced_reply_wakes_while_sleeping() -> None:
@@ -1157,3 +1158,56 @@ async def test_autotrigger_skips_when_addressed_to_other_user(monkeypatch) -> No
     )
     assert ok is False
     assert sent == []
+
+
+def test_in_window_call_is_forced_not_duplicate(manager: PresenceManager) -> None:
+    config = keyword_config()
+    first = manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config,
+        now=0.0,
+    )
+    assert first.action is Action.KEYWORD_CALL
+    # 窗口里再叫一次名字：只交回 0-1，不在这里吞掉
+    again = manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k2",
+        config=config,
+        now=10.0,
+    )
+    assert again.reason == "keyword_awake"
+    forced = manager.observe_active(
+        event(text="大肥鱼不理我", message_id="k2"),
+        config=config,
+        now=10.0,
+        roll=0.99,
+        force=True,
+    )
+    # 关键：不能被 duplicate 拦下
+    assert forced.action is Action.IN_WINDOW
+
+
+def test_policy_pass_does_not_close_window(manager: PresenceManager) -> None:
+    config = keyword_config()
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config,
+        now=0.0,
+    )
+    for index, mid in enumerate(("p1", "p2", "p3")):
+        decision = manager.observe_active(
+            event(text="人又没了", message_id=mid),
+            config=config,
+            now=20.0 + index,
+            policy_pass=True,
+        )
+        assert decision.reason == "policy_pass"
+    assert manager.state_of("g1", now=30.0) is PresenceState.AWAKE

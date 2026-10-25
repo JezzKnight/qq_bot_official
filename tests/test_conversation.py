@@ -257,3 +257,32 @@ def test_manager_tracks_rebuild_state() -> None:
     assert not manager.needs_rebuild("G1")
     manager.reset()
     assert manager.needs_rebuild("G1")
+
+
+def test_followup_question_targets_bot() -> None:
+    conv = GroupConversation()
+    conv.observe(node("m1", "U1", "大肥鱼在不在", at=100.0))
+    conv.note_bot("在 咋了", at=101.0)
+    conv.observe(node("m2", "U1", "昨晚CS比赛什么结果", at=110.0))
+    addressee = conv.resolve(conv.history()[-1], bot_names=("大肥鱼",))
+    assert addressee.target == "bot"
+    assert addressee.score == 0.65
+    assert "追问" in addressee.evidence[0]
+
+
+def test_followup_question_expires() -> None:
+    conv = GroupConversation()
+    conv.observe(node("m1", "U1", "大肥鱼在不在", at=100.0))
+    conv.note_bot("在 咋了", at=101.0)
+    conv.observe(node("m2", "U1", "昨晚CS比赛什么结果", at=500.0))
+    addressee = conv.resolve(conv.history()[-1], bot_names=("大肥鱼",))
+    assert addressee.target == "group"
+
+
+def test_plain_reply_after_bot_is_not_followup() -> None:
+    conv = GroupConversation()
+    conv.observe(node("m1", "U1", "大肥鱼在不在", at=100.0))
+    conv.note_bot("在 咋了", at=101.0)
+    conv.observe(node("m2", "U1", "我草里的", at=110.0))
+    addressee = conv.resolve(conv.history()[-1], bot_names=("大肥鱼",))
+    assert addressee.target == "group"

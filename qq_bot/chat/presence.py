@@ -287,12 +287,14 @@ class PresenceManager:
             return self._skip_group(group_key, group, "proactive_disabled")
         if message_id and message_id in group.recent_ids:
             return self._skip_group(group_key, group, "duplicate")
-        self._remember(group, message_id)
         if kind == "homonym":
+            self._remember(group, message_id)
             return self._skip_group(group_key, group, "homonym")
         if group.state is PresenceState.AWAKE:
-            # 窗口里再提名字：不重复开窗、不重复过渡，交回 0-1 正常判定
+            # 窗口里再叫名字：不重复开窗，交回 0-1（上层 is force）正常判定。
+            # 这里不能记 message_id，否则 observe_active 会把它当重复消息跳过。
             return self._skip_group(group_key, group, "keyword_awake")
+        self._remember(group, message_id)
         if group.daily_count >= config.daily_active:
             return self._skip_group(group_key, group, "daily_cap")
         if now < group.keyword_until:
@@ -331,7 +333,7 @@ class PresenceManager:
 
     # ── 主动路径（0-1 / 复读）────────────────────────────────────────
 
-    def observe_active(  # noqa: C901, PLR0911, PLR0912, PLR0913
+    def observe_active(  # noqa: C901, PLR0911, PLR0913
         self,
         event: PresenceEvent,
         *,
@@ -399,9 +401,9 @@ class PresenceManager:
             return self._skip(event, group, "not_acceptable")
 
         if policy_pass:
-            # 会话图判定「这条不是对 bot 说的」：窗口内只累计 PASS，不接
-            if group.state is PresenceState.AWAKE:
-                self.note_pass(event.group_key, config=config, now=now)
+            # 会话图判定「这条不是对 bot 说的」：直接忽略。
+            # 不累计 PASS_LIMIT——那是 judge 用来判「大家已经聊别的了」的，
+            # 几句无关闲聊不该把刚开的窗口提前关掉。
             return self._skip(event, group, "policy_pass")
 
         if group.state is PresenceState.AWAKE:
