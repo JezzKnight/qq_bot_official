@@ -60,6 +60,7 @@ class AiChatConfig(BaseModel):
 
     # ── 群聊存在感 · 参与策略（P2：明确场景由会话图接管）──
     group_presence_policy_enabled: bool = True  # 关掉后退回纯 judge/0-1
+    group_presence_policy_force_score: float = 0.9  # 指向 bot 达到该分即强制回
 
     # ── 群聊存在感 · 窗口内模型判定（P3）──
     group_presence_judge_enabled: bool = False  # 窗口内先让模型判 reply/pass/sleep

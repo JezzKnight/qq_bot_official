@@ -252,3 +252,36 @@ async def test_clear_group_threads_and_memories(repo) -> None:
     assert await repo.history(keep, 10)
     assert await repo.list_memories(user_id="U1", group_id="G9") == []
     assert await repo.list_memories(user_id="U1", group_id="G10")
+
+
+async def test_recent_group_messages_across_threads(repo) -> None:
+    t1 = await repo.ensure_thread("group_member", "G900", "U1")
+    t2 = await repo.ensure_thread("group_member", "G900", "U2")
+    await repo.append(
+        thread_id=t1,
+        group_id="G900",
+        sender_id="U1",
+        role="user",
+        content="三斤",
+        sender_name="小明",
+    )
+    await repo.append(
+        thread_id=t2,
+        group_id="G900",
+        sender_id="U2",
+        role="user",
+        content="五斤",
+        sender_name="阿强",
+    )
+    await repo.append(
+        thread_id=t1,
+        group_id="G900",
+        sender_id=None,
+        role="assistant",
+        content="牛啊",
+    )
+    rows = await repo.recent_group_messages("G900")
+    assert [m.content for m in rows] == ["三斤", "五斤", "牛啊"]
+    assert rows[0].sender_id == "U1"
+    assert rows[1].sender_name == "阿强"
+    assert rows[2].role == "assistant"

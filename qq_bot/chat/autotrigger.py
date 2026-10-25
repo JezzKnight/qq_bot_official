@@ -210,7 +210,9 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
     if cfg.policy_enabled and not keyword_awake:
         addressee = conversation.manager.addressee(group_key, bot_names=cfg.keywords)
         relevant = conversation.manager.topic_relevant(group_key)
-        policy = participation.decide(addressee, relevant=relevant)
+        policy = participation.decide(
+            addressee, relevant=relevant, force_score=cfg.policy_force_score
+        )
         logger.info(
             "presence policy group=%s target=%s score=%.2f action=%s reason=%s",
             group_key,

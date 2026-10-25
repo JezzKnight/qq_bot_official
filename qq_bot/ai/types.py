@@ -10,6 +10,7 @@ class ImageData:
 class ChatMessage:
     role: str
     sender_name: str | None = None
+    sender_id: str | None = None
     content: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[dict] | None = None

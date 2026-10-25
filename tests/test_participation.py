@@ -45,3 +45,12 @@ def test_group_topic_irrelevant_is_skipped() -> None:
     decision = decide(Addressee("group", 0.2, ("无明确指向",)), relevant=False)
     assert decision.action == ACTION_PASS
     assert decision.reason == "topic_irrelevant"
+
+
+def test_force_score_threshold_is_configurable() -> None:
+    loose = decide(Addressee("bot", 0.85, ("名字",)), relevant=False, force_score=0.8)
+    assert loose.action == ACTION_REPLY
+    strict = decide(
+        Addressee("bot", 0.85, ("名字",)), relevant=False, force_score=0.95
+    )
+    assert strict.action == ACTION_PRESENCE

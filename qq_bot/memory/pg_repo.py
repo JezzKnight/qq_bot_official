@@ -118,7 +118,8 @@ class PgRepository:
         """个人线程最近 limit 条，按时间升序返回。"""
         rows = await self.pool.fetch(
             """
-            SELECT role, sender_name, content, tool_call_id, tool_calls, external_id
+            SELECT role, sender_name, sender_id, content,
+                   tool_call_id, tool_calls, external_id
               FROM messages WHERE thread_id = $1 ORDER BY id DESC LIMIT $2
             """,
             thread_id,
@@ -132,13 +133,31 @@ class PgRepository:
         """群窗口：他人的最近 limit 条（排除本人线程，保证与个人线程不重叠）。"""
         rows = await self.pool.fetch(
             """
-            SELECT role, sender_name, content, tool_call_id, tool_calls, external_id
+            SELECT role, sender_name, sender_id, content,
+                   tool_call_id, tool_calls, external_id
               FROM messages
              WHERE group_id = $1 AND thread_id <> $2
              ORDER BY id DESC LIMIT $3
             """,
             group_id,
             exclude_thread_id,
+            limit,
+        )
+        return [self._to_message(r) for r in reversed(rows)]
+
+    async def recent_group_messages(
+        self, group_id: str, limit: int = 30
+    ) -> list[ChatMessage]:
+        """重建会话图用：同群最近 ``limit`` 条（跨线程，按时间升序）。"""
+        rows = await self.pool.fetch(
+            """
+            SELECT role, sender_name, sender_id, content,
+                   tool_call_id, tool_calls, external_id
+              FROM messages
+             WHERE group_id = $1
+             ORDER BY id DESC LIMIT $2
+            """,
+            group_id,
             limit,
         )
         return [self._to_message(r) for r in reversed(rows)]
@@ -852,6 +871,7 @@ class PgRepository:
         return ChatMessage(
             role=row["role"],
             sender_name=row["sender_name"],
+            sender_id=row.get("sender_id"),
             content=row["content"],
             tool_call_id=row["tool_call_id"],
             tool_calls=row["tool_calls"],

@@ -28,12 +28,17 @@ class PolicyDecision:
     reason: str
 
 
-def decide(addressee: Addressee | None, *, relevant: bool) -> PolicyDecision:
+def decide(
+    addressee: Addressee | None,
+    *,
+    relevant: bool,
+    force_score: float = FORCE_REPLY_SCORE,
+) -> PolicyDecision:
     """按会话图的指向给出策略；拿不准就交回 presence。"""
     if addressee is None:
         return PolicyDecision(ACTION_PRESENCE, "no_context")
     if addressee.target == BOT_TARGET:
-        if addressee.score >= FORCE_REPLY_SCORE:
+        if addressee.score >= force_score:
             return PolicyDecision(ACTION_REPLY, "target_bot")
         # 「你」指 bot（0.75）或 bot 后的疑问（0.6）：模糊，交给 judge
         return PolicyDecision(ACTION_PRESENCE, "bot_gray")

@@ -200,3 +200,60 @@ def test_topic_tokens_drops_punctuation() -> None:
 
     with pytest.raises(AttributeError):
         tokens.add("x")
+
+
+def test_observe_skips_duplicate_mid() -> None:
+    conv = GroupConversation()
+    conv.observe(node("m1", "U1", "在吗"))
+    conv.observe(node("m1", "U1", "在吗"))
+    assert len(conv.history()) == 1
+    assert conv.ledger.count_of("U1") == 1
+
+
+def test_rebuild_restores_window_and_ledger() -> None:
+    from qq_bot.ai.types import ChatMessage
+
+    conv = GroupConversation()
+    conv.rebuild(
+        [
+            ChatMessage(
+                role="user", sender_name="小明", sender_id="U1", content="三斤的鲤鱼"
+            ),
+            ChatMessage(role="assistant", content="牛啊"),
+            ChatMessage(
+                role="user", sender_name="阿强", sender_id="U2", content="我五斤二两"
+            ),
+        ]
+    )
+    nodes = conv.history()
+    assert [n.sender_name for n in nodes] == ["小明", "阿强"]
+    assert nodes[0].sender_id == "U1"
+    assert conv.ledger.count_of("U1") == 1
+    assert conv.last_bot_text == "牛啊"
+    # 顺序是 小明 → 牛啊(bot) → 阿强，所以阿强的上一句是 bot
+    assert conv.prev_speaker(nodes[-1]) == ("bot", "bot")
+
+
+def test_rebuild_marks_bot_as_last_speaker() -> None:
+    from qq_bot.ai.types import ChatMessage
+
+    conv = GroupConversation()
+    conv.rebuild(
+        [
+            ChatMessage(
+                role="user", sender_name="小明", sender_id="U1", content="在吗"
+            ),
+            ChatMessage(role="assistant", content="在"),
+        ]
+    )
+    conv.observe(node("m2", "U9", "来了", at=5.0))
+    assert conv.prev_speaker(conv.history()[-1]) == ("bot", "bot")
+
+
+def test_manager_tracks_rebuild_state() -> None:
+    manager = ConversationManager()
+    assert manager.needs_rebuild("G1")
+    manager.mark_rebuilt("G1")
+    assert not manager.needs_rebuild("G1")
+    manager.reset()
+    assert manager.needs_rebuild("G1")

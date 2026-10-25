@@ -151,11 +151,14 @@ def _annotate_history(history: list[ChatMessage]) -> list[ChatMessage]:
             annotated.append(message)
             continue
         name = escape_for_prompt(message.sender_name or "某成员")
+        uid = escape_for_prompt(message.sender_id or "")
+        identity = (
+            f'<user identity name="{name}" id="{uid}"/>'
+            if uid
+            else f'<user identity name="{name}"/>'
+        )
         annotated.append(
-            replace(
-                message,
-                content=f'<user identity name="{name}"/>\n{message.content}',
-            )
+            replace(message, content=f"{identity}\n{message.content}")
         )
     return annotated
 

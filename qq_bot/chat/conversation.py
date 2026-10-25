@@ -1,7 +1,7 @@
-"""群聊会话图：消息缓冲、发言账本、指向解析与 ``[群聊状态]`` 注入。
+"""群聊会话图：消息缓冲、发言账本与指向解析。
 
-P1 只做三件事：维护每群最近若干条消息、按人聚合发言统计、解析当前消息在
-跟谁说话。不改变回复判定，也不做持久化；重启后从空开始。
+维护每群最近若干条消息、按人聚合发言统计，并解析当前消息在跟谁说话。
+不落库；进程启动后按群懒加载，从 ``messages`` 表回填最近窗口。
 """
 
 from __future__ import annotations
@@ -12,8 +12,14 @@ import unicodedata
 from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass, field
 from itertools import pairwise
+from typing import TYPE_CHECKING
 
 from qq_bot.chat.relevance import KeywordKind, fast_kind, find_keyword
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from qq_bot.ai.types import ChatMessage
 
 MAX_GROUPS = 512
 DEFAULT_WINDOW_SEC = 600.0
@@ -152,6 +158,8 @@ class GroupConversation:
         self.bot_mids: set[str] = set()
 
     def observe(self, node: MessageNode) -> None:
+        if any(item.mid == node.mid for item in self.nodes):
+            return
         self.nodes.append(node)
         self.ledger.observe(node)
 
@@ -161,6 +169,32 @@ class GroupConversation:
         self.last_bot_text = text
         if message_id:
             self.bot_mids.add(message_id)
+
+    def rebuild(self, rows: Sequence[ChatMessage]) -> None:
+        """从数据库行重建窗口；assistant 行只恢复 bot 发言标记。"""
+        self.nodes.clear()
+        self.ledger = SpeakerLedger()
+        self.bot_mids.clear()
+        self.last_bot_at = 0.0
+        self.last_bot_text = ""
+        for index, row in enumerate(rows):
+            at = float(index)
+            content = row.content or ""
+            if row.role == "assistant":
+                self.note_bot(content, at=at)
+                continue
+            if row.role != "user" or not content:
+                continue
+            self.observe(
+                MessageNode(
+                    mid=row.external_id or f"db:{index}",
+                    sender_id=row.sender_id or f"db-user:{index}",
+                    sender_name=row.sender_name or UNKNOWN_NAME,
+                    text=content,
+                    at=at,
+                    tokens=topic_tokens(content),
+                )
+            )
 
     def history(self) -> list[MessageNode]:
         return list(self.nodes)
@@ -252,6 +286,7 @@ class ConversationManager:
 
     def __init__(self, max_groups: int = MAX_GROUPS) -> None:
         self._groups: OrderedDict[str, GroupConversation] = OrderedDict()
+        self._rebuilt: set[str] = set()
         self._max_groups = max_groups
         self.bot_id = ""
 
@@ -344,7 +379,18 @@ class ConversationManager:
             conversation.nodes[-1], window=window, min_overlap=min_overlap
         )
 
+    def needs_rebuild(self, group_key: str) -> bool:
+        """本群是否还没从数据库回填过。"""
+        return group_key not in self._rebuilt
+
+    def mark_rebuilt(self, group_key: str) -> None:
+        self._rebuilt.add(group_key)
+
+    def rebuild(self, group_key: str, rows: Sequence[ChatMessage]) -> None:
+        self._get(group_key).rebuild(rows)
+
     def reset(self) -> None:
         self._groups.clear()
+        self._rebuilt.clear()
 
 manager = ConversationManager()

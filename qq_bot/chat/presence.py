@@ -122,6 +122,7 @@ class PresenceConfig:
     keyword_context_messages: int = 15
     keyword_fallback: str = "什么意思"
     policy_enabled: bool = True
+    policy_force_score: float = 0.9
     judge_enabled: bool = False
     judge_timeout_sec: float = 1.5
     judge_context_messages: int = 8
@@ -754,6 +755,9 @@ def config_from(settings: Any) -> PresenceConfig:
         ),
         keyword_fallback=str(get("group_presence_keyword_fallback", "什么意思")),
         policy_enabled=bool(get("group_presence_policy_enabled", True)),
+        policy_force_score=float(
+            get("group_presence_policy_force_score", 0.9)
+        ),
         judge_enabled=bool(get("group_presence_judge_enabled", False)),
         judge_timeout_sec=float(get("group_presence_judge_timeout_sec", 1.5)),
         judge_context_messages=int(

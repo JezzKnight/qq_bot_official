@@ -30,3 +30,13 @@ def test_assistant_and_already_tagged_messages_untouched() -> None:
     assert annotated[0].content == "牛啊"
     assert annotated[1].content == tagged
     assert annotated[2].content is None
+
+
+def test_identity_tag_includes_sender_id() -> None:
+    history = [
+        ChatMessage(
+            role="user", sender_name="小明", sender_id="U1", content="我钓了三斤"
+        )
+    ]
+    annotated = _annotate_history(history)
+    assert annotated[0].content == '<user identity name="小明" id="U1"/>\n我钓了三斤'

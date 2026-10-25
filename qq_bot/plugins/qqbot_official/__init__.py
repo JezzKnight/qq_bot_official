@@ -137,15 +137,31 @@ def _event_mentions(
     return tuple(mentions), mention_bot
 
 
-def _observe_conversation(
+async def _rebuild_conversation(group_key: str) -> None:
+    """进程启动后按群回填最近窗口；失败只记日志。"""
+    try:
+        memory = await get_memory()
+        if memory is None:
+            return
+        rows = await memory.recent_group_messages(group_key)
+        conversation.manager.rebuild(group_key, rows)
+        logger.info("presence rebuild group=%s rows=%d", group_key, len(rows))
+    except Exception:
+        logger.exception("presence 重建失败 group=%s", group_key)
+
+
+async def _observe_conversation(
     bot: Bot, event: QQMessageEvent, incoming: Incoming, config: AiChatConfig
 ) -> None:
-    """把群消息喂给会话图；关掉开关时什么都不做。"""
+    """把群消息喂给会话图；本群首次出现时先从数据库回填。"""
     if not incoming.group_key or not config.group_conversation_enabled:
         return
     bot_id = str(getattr(bot, "self_id", "") or "")
     if bot_id:
         conversation.manager.bind_bot(bot_id)
+    if conversation.manager.needs_rebuild(incoming.group_key):
+        await _rebuild_conversation(incoming.group_key)
+        conversation.manager.mark_rebuilt(incoming.group_key)
     mentions, mention_bot = _event_mentions(event, bot_id)
     conversation.manager.observe(
         group_key=incoming.group_key,
@@ -167,7 +183,7 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
 
     config = get_plugin_config(AiChatConfig)
     if incoming.group_key:
-        _observe_conversation(bot, event, incoming, config)
+        await _observe_conversation(bot, event, incoming, config)
         # 登记被动窗口：@ 这一轮按最保守口径记账（假设 4 段已用满）。
         passive_window.register(
             incoming.group_key,
@@ -256,7 +272,7 @@ if _FULL_GROUP:
     async def handle_full_message(bot: Bot, event: QQMessageEvent) -> None:
         config = get_plugin_config(AiChatConfig)
         incoming = qq_from_event(event, reply=QQReply(bot, event))
-        _observe_conversation(bot, event, incoming, config)
+        await _observe_conversation(bot, event, incoming, config)
         await _record_full_message(bot, event, incoming=incoming)
         if config.group_presence_enabled:
             await maybe_autotrigger(bot, event, config=config, incoming=incoming)
