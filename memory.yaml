@@ -7,8 +7,8 @@
 backend: postgres        # postgres | sqlite（P1–P3 期间保留 sqlite 以便回滚）
 
 short_term:
-  group_window: 20       # ② 群原始窗口：他人最近 M 条
-  thread_window: 12      # ③ 个人线程窗口：本人最近 K 条
+  conversation_window: 30   # 群聊：同群最近 N 条（跨线程，按时间）
+  thread_window: 12         # 私聊：个人线程最近 K 条
 
 compression:
   trigger_turns: 50      # 唯一触发器：未摘要的群 user 消息达到 N 条
@@ -19,7 +19,7 @@ compression:
 budget:                  # 各层注入预算（token）
   long_term: 800
   group_summary: 600
-  group_window: 1500
+  conversation_window: 4000
   thread_window: 2500
 
 retention:

@@ -148,15 +148,51 @@ async def test_build_context_does_not_overlap(repo) -> None:
         sender_name="阿强",
     )
     cfg = MemoryConfig(
-        short_term=ShortTermConfig(group_window=10, thread_window=10),
-        budget=BudgetConfig(group_window=10_000, thread_window=10_000),
+        short_term=ShortTermConfig(conversation_window=10, thread_window=10),
+        budget=BudgetConfig(conversation_window=10_000, thread_window=10_000),
     )
     parts = await build_context(repo, thread_id=mine, group_id="G100", config=cfg)
-    mine_text = [m.content for m in parts.thread_window]
-    other_text = [m.content for m in parts.group_window]
-    assert mine_text == ["我的消息"]
-    assert other_text == ["他的消息"]
-    assert not set(mine_text) & set(other_text)
+    texts = [m.content for m in parts.conversation]
+    assert texts == ["我的消息", "他的消息"]
+
+
+async def test_group_context_merges_threads_and_formats_summary(repo) -> None:
+    from qq_bot.memory.assembler import build_context
+
+    a = await repo.ensure_thread("group_member", "G200", "U1")
+    b = await repo.ensure_thread("group_member", "G200", "U2")
+    first = await repo.append(
+        thread_id=a, group_id="G200", sender_id="U1", role="user",
+        content="我先说", sender_name="小明",
+    )
+    await repo.append(
+        thread_id=b, group_id="G200", sender_id="U2", role="user",
+        content="他再说", sender_name="阿强",
+    )
+    last = await repo.append(
+        thread_id=a, group_id="G200", sender_id="U1", role="assistant",
+        content="bot 回一句", sender_name=None,
+    )
+    times = await repo.message_time_range("G200", first, last)
+    assert times is not None
+    await repo.insert_summary(
+        group_id="G200",
+        content="他们把钓鱼的事聊完了。",
+        covers_from=first,
+        covers_to=last,
+        covers_from_at=times[0],
+        covers_to_at=times[1],
+    )
+    cfg = MemoryConfig(
+        short_term=ShortTermConfig(conversation_window=10, thread_window=10),
+        budget=BudgetConfig(conversation_window=10_000, thread_window=10_000),
+    )
+    parts = await build_context(repo, thread_id=a, group_id="G200", config=cfg)
+    assert [m.content for m in parts.conversation] == ["我先说", "他再说", "bot 回一句"]
+    assert parts.summary is not None
+    assert parts.summary.startswith("这段摘要发生的时间在<")
+    assert "仅供参考" in parts.summary
+    assert "他们把钓鱼的事聊完了。" in parts.summary
 
 
 async def test_duplicate_external_id_is_ignored(repo) -> None:
@@ -206,7 +242,7 @@ async def test_build_context_excludes_current_message(repo) -> None:
     parts = await build_context(
         repo, thread_id=tid, group_id=None, config=cfg, exclude_external_id="M-now"
     )
-    assert parts.thread_window == []
+    assert parts.conversation == []
 
 
 async def test_budget_trims_oldest() -> None:

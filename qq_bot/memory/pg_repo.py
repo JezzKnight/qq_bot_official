@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime  # noqa: TC003 - 运行期注解/类型检查都要用
 from typing import Any
 
 import asyncpg
@@ -253,6 +254,35 @@ class PgRepository:
             group_id,
         )
 
+    async def latest_summary_row(self, group_id: str) -> dict[str, Any] | None:
+        """最新摘要及其覆盖时间段（注入时拼给模型）。"""
+        row = await self.pool.fetchrow(
+            """
+            SELECT content, covers_from_at, covers_to_at FROM group_summaries
+             WHERE group_id = $1 ORDER BY covers_to DESC LIMIT 1
+            """,
+            group_id,
+        )
+        return dict(row) if row is not None else None
+
+    async def message_time_range(
+        self, group_id: str, covers_from: int, covers_to: int
+    ) -> tuple[datetime, datetime] | None:
+        """摘要覆盖区间的首尾消息时间。"""
+        row = await self.pool.fetchrow(
+            """
+            SELECT min(created_at) AS from_at, max(created_at) AS to_at
+              FROM messages
+             WHERE group_id = $1 AND id BETWEEN $2 AND $3
+            """,
+            group_id,
+            covers_from,
+            covers_to,
+        )
+        if row is None or row["from_at"] is None:
+            return None
+        return row["from_at"], row["to_at"]
+
     async def count_user_messages_since(self, group_id: str, after_id: int) -> int:
         value = await self.pool.fetchval(
             """
@@ -328,14 +358,22 @@ class PgRepository:
         )
         return [str(r["group_id"]) for r in rows]
 
-    async def insert_summary(
-        self, *, group_id: str, content: str, covers_from: int, covers_to: int
+    async def insert_summary(  # noqa: PLR0913
+        self,
+        *,
+        group_id: str,
+        content: str,
+        covers_from: int,
+        covers_to: int,
+        covers_from_at: datetime | None = None,
+        covers_to_at: datetime | None = None,
     ) -> None:
         await self.pool.execute(
             """
             INSERT INTO group_summaries
-                (group_id, content, covers_from, covers_to, token_est)
-            VALUES ($1, $2, $3, $4, $5)
+                (group_id, content, covers_from, covers_to, token_est,
+                 covers_from_at, covers_to_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (group_id, covers_to) DO NOTHING
             """,
             group_id,
@@ -343,6 +381,8 @@ class PgRepository:
             covers_from,
             covers_to,
             estimate_tokens(content),
+            covers_from_at,
+            covers_to_at,
         )
 
     # ── 身份 ──────────────────────────────────────────────

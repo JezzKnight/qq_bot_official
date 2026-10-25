@@ -398,20 +398,15 @@ async def _classify(
 async def _keyword_context(
     incoming: Incoming, config: PresenceConfig
 ) -> tuple[list[Any], str | None]:
-    """读群摘要与群窗口（**不含**个人线程），失败就当没有上下文。"""
+    """读群摘要与对话记录窗口，失败就当没有上下文。"""
     try:
         from qq_bot.services.memory_writing import get_memory
 
         memory = await get_memory()
         if memory is None:
             return [], None
-        thread_id = await memory.ensure_thread(
-            kind="group_member",
-            group_id=incoming.group_key,
-            user_id=incoming.user_key,
-        )
-        window = await memory.group_window(
-            incoming.group_key, thread_id, config.keyword_context_messages
+        window = await memory.recent_group_messages(
+            incoming.group_key, config.keyword_context_messages
         )
         summary = await memory.latest_summary(incoming.group_key)
         return list(window), summary
@@ -465,8 +460,8 @@ async def _judge_action(
 
         memory = await get_memory()
         if memory is not None:
-            window = await memory.group_window(
-                incoming.group_key, 0, config.judge_context_messages
+            window = await memory.recent_group_messages(
+                incoming.group_key, config.judge_context_messages
             )
             recent = [
                 {

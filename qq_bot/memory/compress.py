@@ -63,7 +63,9 @@ async def compress_if_needed(
         return None
 
     # 窗口内保持原文；窗口边界在锁内再校验一次
-    cutoff = await repo.cutoff_for_window(group_id, config.short_term.group_window)
+    cutoff = await repo.cutoff_for_window(
+        group_id, config.short_term.conversation_window
+    )
     if cutoff <= last_covered:
         return None
 
@@ -128,11 +130,15 @@ async def _compress_locked(
         return None
 
     covers_from = 1 if rebuilt else messages[0]["id"]
+    covers_to = messages[-1]["id"]
+    times = await repo.message_time_range(group_id, covers_from, covers_to)
     await repo.insert_summary(
         group_id=group_id,
         content=content,
         covers_from=covers_from,
-        covers_to=messages[-1]["id"],
+        covers_to=covers_to,
+        covers_from_at=times[0] if times else None,
+        covers_to_at=times[1] if times else None,
     )
     return CompressOutcome(
         covers_from=covers_from,

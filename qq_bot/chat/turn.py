@@ -251,7 +251,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
             mode=mode_part,
             sticker=sticker_catalog,
             summary=(
-                f"## 群聊摘要（更早的对话，仅供参考）\n{parts.summary}"
+                f"## 群聊摘要（更早的对话）\n{parts.summary}"
                 if parts.summary
                 else ""
             ),

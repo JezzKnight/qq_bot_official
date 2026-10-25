@@ -31,8 +31,8 @@ def _env(name: str, default: str = "") -> str:
 
 @dataclass(frozen=True)
 class ShortTermConfig:
-    group_window: int = 20
-    thread_window: int = 12
+    conversation_window: int = 30  # 群聊：跨线程的最近 N 条
+    thread_window: int = 12  # 私聊：个人线程最近 N 条
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class CompressionConfig:
 class BudgetConfig:
     long_term: int = 800
     group_summary: int = 600
-    group_window: int = 1500
+    conversation_window: int = 4000
     thread_window: int = 2500
 
 
@@ -126,7 +126,9 @@ def load_memory_config(path: str | Path | None = None) -> MemoryConfig:
         backend=backend,
         dsn=str(data.get("dsn") or "").strip(),
         short_term=ShortTermConfig(
-            group_window=_as_int(short, "group_window", base.group_window),
+            conversation_window=_as_int(
+                short, "conversation_window", base.conversation_window
+            ),
             thread_window=_as_int(short, "thread_window", base.thread_window),
         ),
         compression=CompressionConfig(
@@ -144,7 +146,9 @@ def load_memory_config(path: str | Path | None = None) -> MemoryConfig:
             group_summary=_as_int(
                 budget, "group_summary", budget_base.group_summary
             ),
-            group_window=_as_int(budget, "group_window", budget_base.group_window),
+            conversation_window=_as_int(
+                budget, "conversation_window", budget_base.conversation_window
+            ),
             thread_window=_as_int(budget, "thread_window", budget_base.thread_window),
         ),
         retention=RetentionConfig(

@@ -16,7 +16,7 @@ def _config(
     *, trigger: int = 3, window: int = 2, rebuild_every: int = 10
 ) -> MemoryConfig:
     return MemoryConfig(
-        short_term=ShortTermConfig(group_window=window, thread_window=10),
+        short_term=ShortTermConfig(conversation_window=window, thread_window=10),
         compression=CompressionConfig(
             trigger_turns=trigger,
             summary_max_tokens=100,

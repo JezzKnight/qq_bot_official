@@ -1,9 +1,10 @@
-"""三层上下文组装：群摘要 + 群窗口 + 个人线程窗口。
+"""上下文组装：群摘要 + 对话记录窗口 + 长期记忆注入。
 
-设计见 docs/memory-design.md §3/§6：
-- 群窗口**排除本人线程**，与个人线程窗口互不重叠；
-- 每层独立 token 预算，超预算只裁本层（从最旧裁）；
-- 摘要段在 P2 接入，缺失时为空。
+设计：
+- 群聊只保留**一个**对话记录窗口：同群最近 N 条（跨线程、按时间升序），不再区分
+  「本人线程」和「群窗口」；每条的说话人由 ``<user identity>`` 标签区分。
+- 私聊仍用个人线程窗口（私聊只有一个线程）。
+- 群摘要由代码拼上「覆盖时间段」与「仅供参考」提醒，避免模型把旧摘要当成刚发生的事。
 """
 
 from __future__ import annotations
@@ -11,28 +12,32 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from .token_est import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from qq_bot.ai.types import ChatMessage
 
     from .memory_config import MemoryConfig
     from .pg_repo import PgRepository
 
+_TZ = ZoneInfo("Asia/Shanghai")
+SUMMARY_HINT = "（以上为群聊摘要，仅供参考；请自行判断是否与当前话题有关。）"
+
 
 @dataclass
 class ContextParts:
-    group_window: list[ChatMessage] = field(default_factory=list)
-    thread_window: list[ChatMessage] = field(default_factory=list)
+    conversation: list[ChatMessage] = field(default_factory=list)
     summary: str | None = None
     stats: dict[str, int] = field(default_factory=dict)
 
     def as_history(self) -> list[ChatMessage]:
-        """注入顺序：群窗口在前（他人），个人线程在后（本人）。"""
-        return [*self.group_window, *self.thread_window]
+        return list(self.conversation)
 
 
 _MIN_KEEP = 2
@@ -48,38 +53,6 @@ def trim_by_budget(
         total -= estimate_tokens(result[0].content)
         result.pop(0)
     return result
-
-
-async def build_context(
-    repo: PgRepository,
-    *,
-    thread_id: int,
-    group_id: str | None,
-    config: MemoryConfig,
-    exclude_external_id: str | None = None,
-) -> ContextParts:
-    parts = ContextParts()
-    thread = await repo.history(thread_id, config.short_term.thread_window)
-    if exclude_external_id:
-        thread = [m for m in thread if m.external_id != exclude_external_id]
-    parts.thread_window = trim_by_budget(
-        thread,
-        config.budget.thread_window,
-    )
-    if group_id is not None:
-        parts.group_window = trim_by_budget(
-            await repo.group_window(
-                group_id, thread_id, config.short_term.group_window
-            ),
-            config.budget.group_window,
-        )
-        parts.summary = await repo.latest_summary(group_id)
-    parts.stats = {
-        "group_window": len(parts.group_window),
-        "thread_window": len(parts.thread_window),
-        "summary_tokens": estimate_tokens(parts.summary),
-    }
-    return parts
 
 
 def trim_messages(messages: list[ChatMessage], budget: int) -> list[ChatMessage]:
@@ -102,3 +75,52 @@ def trim_messages(messages: list[ChatMessage], budget: int) -> list[ChatMessage]
             budget,
         )
     return result
+
+
+def _fmt_time(value: datetime | None) -> str:
+    if value is None:
+        return "未知"
+    return value.astimezone(_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def format_summary(row: dict) -> str:
+    """拼摘要正文：时间段 + 原文 + 仅供参考提醒。"""
+    content = str(row.get("content") or "").strip()
+    from_at = _fmt_time(row.get("covers_from_at"))
+    to_at = _fmt_time(row.get("covers_to_at"))
+    span = f"{from_at} 至 {to_at}"
+    header = f"这段摘要发生的时间在<{span}>（北京时间）"
+    return f"{header}\n{content}\n\n{SUMMARY_HINT}"
+
+
+async def build_context(
+    repo: PgRepository,
+    *,
+    thread_id: int,
+    group_id: str | None,
+    config: MemoryConfig,
+    exclude_external_id: str | None = None,
+) -> ContextParts:
+    parts = ContextParts()
+    if group_id is None:
+        history = await repo.history(thread_id, config.short_term.thread_window)
+        if exclude_external_id:
+            history = [m for m in history if m.external_id != exclude_external_id]
+        parts.conversation = trim_by_budget(history, config.budget.thread_window)
+        parts.stats = {"conversation": len(parts.conversation)}
+        return parts
+
+    rows = await repo.recent_group_messages(
+        group_id, config.short_term.conversation_window
+    )
+    if exclude_external_id:
+        rows = [m for m in rows if m.external_id != exclude_external_id]
+    parts.conversation = trim_by_budget(rows, config.budget.conversation_window)
+    summary_row = await repo.latest_summary_row(group_id)
+    if summary_row:
+        parts.summary = format_summary(summary_row)
+    parts.stats = {
+        "conversation": len(parts.conversation),
+        "summary_tokens": estimate_tokens(parts.summary),
+    }
+    return parts
