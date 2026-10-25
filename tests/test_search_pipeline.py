@@ -1,13 +1,13 @@
+"""搜索管线：DeepSeek 搜索 + 重排 + 缓存 + 补查。"""
+
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, cast
 
 from qq_bot.ai.types import ChatResponse
 from qq_bot.search.cache import SearchCache
 from qq_bot.search.deepseek import DeepSeekSearchProvider
-from qq_bot.search.pipeline import SearchPipeline, resolve_mode
-from qq_bot.search.planner import _parse_queries, infer_time_range
+from qq_bot.search.pipeline import SearchPipeline
 from qq_bot.search.rerank import (
     build_context,
     clean_snippet,
@@ -20,7 +20,6 @@ from qq_bot.search.types import SearchItem
 
 if TYPE_CHECKING:
     from qq_bot.ai.openai_client import OpenaiCompatClient
-    from qq_bot.tools.tavily_client import TavilyClient
 
 
 class FakeModel:
@@ -31,48 +30,6 @@ class FakeModel:
 
     async def chat(self, **_kwargs: object) -> ChatResponse:
         return ChatResponse(content=self.content)
-
-
-class FakeTavily:
-    def __init__(self) -> None:
-        self.search_calls: list[dict] = []
-        self.extract_calls: list[dict] = []
-
-    async def search(self, payload: dict) -> dict:
-        self.search_calls.append(payload)
-        query = str(payload["query"])
-        return {
-            "results": [
-                {
-                    "title": f"{query} 结果 A",
-                    "url": "https://example.com/a",
-                    "content": "赛程 第一场 第二场",
-                    "score": 0.9,
-                    "published_date": "2026-10-20",
-                },
-                {
-                    "title": f"{query} 结果 B",
-                    "url": "https://example.org/b",
-                    "content": "门票 场馆 交通",
-                    "score": 0.8,
-                },
-            ]
-        }
-
-    async def extract(self, payload: dict) -> dict:
-        self.extract_calls.append(payload)
-        return {
-            "results": [
-                {
-                    "url": url,
-                    "raw_content": (
-                        "<html><body><p>这是抓取到的正文，包含赛程和日期。</p>"
-                        "<script>bad()</script></body></html>"
-                    ),
-                }
-                for url in payload["urls"]
-            ]
-        }
 
 
 class FakeDeepSeek:
@@ -111,27 +68,15 @@ class FakeDeepSeek:
 
 
 def _pipeline(
-    fake: FakeTavily,
     model: FakeModel | None = None,
     deepseek: FakeDeepSeek | None = None,
 ) -> SearchPipeline:
     return SearchPipeline(
-        cast("TavilyClient", fake),
+        cast("DeepSeekSearchProvider", deepseek or FakeDeepSeek()),
         cast("OpenaiCompatClient", model or FakeModel()),
         "fake-model",
         cache=SearchCache(ttl_seconds=60),
-        fast_provider=cast("DeepSeekSearchProvider", deepseek),
     )
-
-
-def test_resolve_mode_accepts_fast() -> None:
-    assert resolve_mode("最近英雄联盟S赛赛程", "fast") == "fast"
-
-
-def test_resolve_mode_auto_upgrades_deep_question() -> None:
-    assert resolve_mode("最近英雄联盟S赛赛程", "auto") == "standard"
-    assert resolve_mode("请详细分析这几个方案的优缺点并做对比", "auto") == "deep"
-    assert resolve_mode("随便查查", "quick") == "quick"
 
 
 def test_clean_snippet_removes_tags_and_scripts() -> None:
@@ -178,69 +123,6 @@ def test_build_context_numbers_sources() -> None:
     assert "2026-10-20" in context
 
 
-async def test_quick_mode_skips_reader() -> None:
-    fake = FakeTavily()
-    outcome = await _pipeline(fake).run("最近英雄联盟S赛赛程", mode="quick")
-    assert outcome.error == ""
-    assert outcome.items
-    assert fake.extract_calls == []
-    assert outcome.reader_sources == []
-    assert "[S1]" in outcome.context
-
-
-async def test_standard_mode_extracts_top_two_sources() -> None:
-    fake = FakeTavily()
-    outcome = await _pipeline(fake).run("最近英雄联盟S赛赛程", mode="standard")
-    assert len(fake.search_calls) == 2
-    assert len(fake.extract_calls) == 1
-    assert len(fake.extract_calls[0]["urls"]) == 2
-    assert any(item.source == "reader" for item in outcome.items)
-    assert "<p>" not in outcome.context
-    assert "这是抓取到的正文" in outcome.context
-
-
-async def test_search_cache_avoids_duplicate_tavily_calls() -> None:
-    fake = FakeTavily()
-    pipeline = _pipeline(fake)
-    first = await pipeline.run("最近英雄联盟S赛赛程", mode="standard")
-    assert not first.cached
-    calls_after_first = len(fake.search_calls)
-
-    second = await pipeline.run("最近英雄联盟S赛赛程", mode="standard")
-    assert second.cached
-    assert len(fake.search_calls) == calls_after_first
-
-
-def test_parse_queries_recovers_truncated_json_array() -> None:
-    content = '["赛马娘 2026年11月 大赛 强势 马娘 推荐'
-    assert _parse_queries(content) == ["赛马娘 2026年11月 大赛 强势 马娘 推荐"]
-
-
-def test_parse_queries_handles_double_encoded_array() -> None:
-    content = json.dumps(
-        json.dumps(["赛马娘 2026年11月 大赛 推荐", "赛马娘 种马 技能"]),
-        ensure_ascii=False,
-    )
-    assert _parse_queries(content) == [
-        "赛马娘 2026年11月 大赛 推荐",
-        "赛马娘 种马 技能",
-    ]
-
-
-def test_infer_time_range_for_recency_questions() -> None:
-    assert infer_time_range("这几天什么地方的天气怎么样") == "week"
-    assert infer_time_range("最近英雄联盟S赛赛程") == "month"
-    assert infer_time_range("赛马娘有哪些马") is None
-
-
-async def test_standard_search_requests_dates_and_time_range() -> None:
-    fake = FakeTavily()
-    await _pipeline(fake).run("最近英雄联盟S赛赛程", mode="standard")
-    assert fake.search_calls
-    assert all(call["include_published_date"] is True for call in fake.search_calls)
-    assert all(call["time_range"] == "month" for call in fake.search_calls)
-
-
 def test_published_timestamp_parses_rfc_and_iso_dates() -> None:
     assert published_timestamp("Tue, 20 Oct 2026 10:35:00 GMT") > 0
     assert published_timestamp("2026-10-20T10:35:00+08:00") > 0
@@ -257,30 +139,24 @@ def test_sort_by_recency_prefers_newest_and_keeps_undated_last() -> None:
     assert [item.title for item in ordered] == ["新", "旧", "无日期"]
 
 
-async def test_fast_mode_uses_deepseek_without_planner_or_reader() -> None:
-    fake_tavily = FakeTavily()
+async def test_run_uses_deepseek_summary_only() -> None:
     deepseek = FakeDeepSeek()
-    outcome = await _pipeline(fake_tavily, deepseek=deepseek).run(
-        "最近英雄联盟S赛赛程", mode="fast"
-    )
+    outcome = await _pipeline(deepseek=deepseek).run("最近英雄联盟S赛赛程")
     assert outcome.mode == "fast"
     assert outcome.error == ""
     assert outcome.items
-    assert fake_tavily.search_calls == []
-    assert fake_tavily.extract_calls == []
     assert len(deepseek.calls) == 1
     assert deepseek.calls[0]["need_content"] is False
     assert "[S1]" in outcome.context
     assert len(outcome.context) <= 5000
 
 
-async def test_fast_mode_cache_avoids_duplicate_deepseek_calls() -> None:
-    fake_tavily = FakeTavily()
+async def test_cache_avoids_duplicate_deepseek_calls() -> None:
     deepseek = FakeDeepSeek()
-    pipeline = _pipeline(fake_tavily, deepseek=deepseek)
-    first = await pipeline.run("最近英雄联盟S赛赛程", mode="fast")
+    pipeline = _pipeline(deepseek=deepseek)
+    first = await pipeline.run("最近英雄联盟S赛赛程")
     assert not first.cached
-    second = await pipeline.run("最近英雄联盟S赛赛程", mode="fast")
+    second = await pipeline.run("最近英雄联盟S赛赛程")
     assert second.cached
     assert len(deepseek.calls) == 1
 
@@ -317,14 +193,13 @@ def test_looks_insufficient_only_matches_explicit_no_data_answers() -> None:
     assert not looks_insufficient("我不确定具体时间，但决赛在 11 月 15 日")
 
 
-async def test_fast_retry_rewrites_query_and_searches_each_one() -> None:
-    fake_tavily = FakeTavily()
+async def test_retry_rewrites_query_and_searches_each_one() -> None:
     deepseek = FakeDeepSeek()
     model = FakeModel(
         '["赛马娘 2026年11月 LoH 京都3000m 强势 马娘", '
         '"ウマ娘 2026年11月 リーグオブヒーローズ 京都3000m 攻略"]'
     )
-    pipeline = _pipeline(fake_tavily, model, deepseek)
+    pipeline = _pipeline(model, deepseek)
 
     outcome = await pipeline.run_retry("下个月赛马娘大赛什么马比较强势")
 
@@ -337,7 +212,6 @@ async def test_fast_retry_rewrites_query_and_searches_each_one() -> None:
         call["ori_question"] == "下个月赛马娘大赛什么马比较强势"
         for call in deepseek.calls
     )
-    assert fake_tavily.search_calls == []
     assert outcome.error == ""
     assert "[S1]" in outcome.context
 

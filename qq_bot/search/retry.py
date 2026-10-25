@@ -17,7 +17,7 @@ from qq_bot.ai.types import ChatMessage
 
 if TYPE_CHECKING:
     from qq_bot.ai.openai_client import OpenaiCompatClient
-    from qq_bot.search.planner import UsageRecorder
+    from qq_bot.search.types import UsageRecorder
 
 logger = logging.getLogger(__name__)
 

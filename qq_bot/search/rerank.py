@@ -1,6 +1,6 @@
 """结果清洗、去重、轻量相关性重排与上下文拼装。
 
-这里不调用额外模型：Tavily 的原始顺序 + 词项覆盖 + 域名多样性，成本低且可解释。
+这里不调用额外模型：搜索 API 的原始顺序 + 词项覆盖 + 域名多样性，成本低且可解释。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ _MIN_TAIL_CHARS = 200
 
 
 def clean_snippet(raw: str, *, max_chars: int = _MAX_ITEM_CHARS) -> str:
-    """清洗 Tavily 摘要 / 网页正文，保留中文句子，去掉标签与多余空白。"""
+    """清洗搜索摘要，保留中文句子，去掉标签与多余空白。"""
     if not raw:
         return ""
     text = _SCRIPT_RE.sub(" ", raw)
@@ -89,7 +89,7 @@ def _domain(url: str) -> str:
 
 
 def _recency_bonus(published_date: str) -> float:
-    """越新的来源加分越多；Tavily 可能返回 RFC 2822 或 ISO 日期。"""
+    """越新的来源加分越多；搜索 API 可能返回 RFC 2822 或 ISO 日期。"""
     timestamp = published_timestamp(published_date)
     if timestamp <= 0:
         return 0.0
@@ -100,7 +100,7 @@ def _recency_bonus(published_date: str) -> float:
 
 
 def published_timestamp(published_date: str) -> float:
-    """解析 Tavily 的 RFC 2822 日期或 ISO 日期，供“按新到旧”排序。"""
+    """解析搜索 API 的 RFC 2822 日期或 ISO 日期，供“按新到旧”排序。"""
     if not published_date:
         return 0.0
     parsed = None

@@ -1,4 +1,4 @@
-"""进程内搜索结果缓存：固定 TTL + LRU，避免同一问题在群里反复烧 Tavily 配额。"""
+"""进程内搜索结果缓存：固定 TTL + LRU，避免同一问题在群里反复调用搜索 API。"""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def make_cache_key(
 
 
 class SearchCache:
-    """只缓存 Tavily 原始结果；reader 正文不进缓存，避免过期正文长期占用内存。"""
+    """只缓存搜索 API 的原始结果；正文不进缓存，避免过期内容长期占用内存。"""
 
     def __init__(
         self,

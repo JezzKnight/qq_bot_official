@@ -37,7 +37,7 @@ QQ | Bot <AppID> connected
 | `QQ_GROUP_FULL_MESSAGES` | 群主开启全量消息后设 true |
 | `PG_*` | PostgreSQL 连接 |
 | `STICKERS_DIR` | 表情包目录 |
-| `DEEPSEEK_API_KEY` / `GLM_API_KEY` / `TAVILY_KEY` | 模型与搜索密钥 |
+| `DEEPSEEK_API_KEY` / `GLM_API_KEY` | 模型与搜索密钥 |
 | `BILIBILI_COOKIE` | B 站登录 Cookie（AI 字幕需要；至少 `SESSDATA=...`）|
 | `VIDEO_*` | 视频上限/帧数/模型等，见 `.env.example` |
 

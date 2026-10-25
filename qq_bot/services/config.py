@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 
 class AiChatConfig(BaseModel):
@@ -72,20 +72,3 @@ class AiChatConfig(BaseModel):
     # ── 群聊会话图（只供参与策略取「指向/话题相关」，不注入 prompt）──
     group_conversation_enabled: bool = True  # 会话图总开关；供参与策略取指向
 
-    # ── WebSearch配置 ──
-    Tavily_key: list[str] = []
-
-    @field_validator("Tavily_key", mode="before")
-    @classmethod
-    def parse_tavily_key(cls, v: str | list) -> list:
-        """解析 Tavily key：支持 JSON 数组、逗号分隔、单值三种格式"""
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return []
-            if v.startswith("["):
-                import json
-
-                return json.loads(v)
-            return [k.strip() for k in v.split(",") if k.strip()]
-        return v

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+UsageRecorder = Any
+
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -10,14 +14,14 @@ SearchMode = Literal["fast", "quick", "standard", "deep"]
 
 @dataclass(frozen=True, slots=True)
 class SearchItem:
-    """一条搜索结果；content 可能是 Tavily 摘要，也可能是 reader 抓取的正文。"""
+    """一条搜索结果；content 是搜索 API 返回的摘要。"""
 
     title: str
     url: str
     content: str = ""
     score: float = 0.0
     published_date: str = ""
-    source: str = "tavily"
+    source: str = "deepseek"
 
     def to_dict(self) -> dict[str, object]:
         return {

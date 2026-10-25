@@ -9,7 +9,7 @@ def test_set_my_name_is_registered() -> None:
 
 
 def test_core_tools_are_registered() -> None:
-    for name in ("save_memory", "recall_memory", "search_agent", "send_sticker"):
+    for name in ("save_memory", "recall_memory", "search", "send_sticker"):
         assert name in TOOLS
 
 

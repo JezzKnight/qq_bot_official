@@ -447,8 +447,8 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                     search_called = True
                     last_search_query = str(args.get("query") or incoming.text)
                     tracker: SearchTracker = {
-                        "tavily_success": False,
-                        "tavily_error_count": 0,
+                        "search_success": False,
+                        "search_error_count": 0,
                         "search_rounds": 0,
                     }
                     current_search_tracker.set(tracker)

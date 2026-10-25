@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 import os
 
-from nonebot import get_plugin_config
-
 from qq_bot.ai.model_registry import get_registry
 from qq_bot.search.deepseek import DeepSeekSearchProvider
 from qq_bot.search.pipeline import SearchPipeline
@@ -16,34 +14,36 @@ from qq_bot.services.client_factory import (
     default_model_name,
     get_client_for_model,
 )
-from qq_bot.services.config import AiChatConfig
 from qq_bot.tools.context import current_search_tracker
 from qq_bot.tools.registry import register_tool
-from qq_bot.tools.tavily_client import TavilyClient
 
 logger = logging.getLogger(__name__)
 
 _pipeline: SearchPipeline | None = None
 
 
+class SearchUnavailableError(RuntimeError):
+    """搜索管线不可用（缺少 API key 等）。"""
+
+
 async def _get_pipeline() -> SearchPipeline:
     """惰性构建：模块导入期没有 NoneBot driver，不能提前 get_plugin_config。"""
     global _pipeline  # noqa: PLW0603
     if _pipeline is None:
-        config = get_plugin_config(AiChatConfig)
         model = default_model_name()
         client = await get_client_for_model(model)
         spec = get_registry().resolve(model)
         api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
         if not api_key and spec is not None and "deepseek" in spec.base_url:
             api_key = spec.api_key
-        fast_provider = DeepSeekSearchProvider(api_key) if api_key else None
+        provider = DeepSeekSearchProvider(api_key) if api_key else None
+        if provider is None:
+            raise SearchUnavailableError
         _pipeline = SearchPipeline(
-            TavilyClient(config),
+            provider,
             client,
             api_model_name(model),
             usage_recorder=token_usage.record,
-            fast_provider=fast_provider,
         )
     return _pipeline
 
@@ -83,14 +83,14 @@ async def search(query: str, mode: str = "fast") -> str:
     except Exception as exc:
         logger.exception("search 工具失败")
         if tracker is not None:
-            tracker["tavily_error_count"] += 1
+            tracker["search_error_count"] += 1
         return f"[搜索失败] {exc}"
 
     if tracker is not None:
         if outcome.items:
-            tracker["tavily_success"] = True
+            tracker["search_success"] = True
         else:
-            tracker["tavily_error_count"] += 1
+            tracker["search_error_count"] += 1
 
     if not outcome.items:
         return f"[搜索失败] {outcome.error or '没有找到有效结果'}"
@@ -111,14 +111,14 @@ async def retry_search(query: str) -> str:
     except Exception:
         logger.exception("search 补查失败")
         if tracker is not None:
-            tracker["tavily_error_count"] += 1
+            tracker["search_error_count"] += 1
         return ""
 
     if tracker is not None:
         if outcome.items:
-            tracker["tavily_success"] = True
+            tracker["search_success"] = True
         else:
-            tracker["tavily_error_count"] += 1
+            tracker["search_error_count"] += 1
     if not outcome.items:
         logger.info("search 补查无结果 query=%s error=%s", query, outcome.error)
         return ""
