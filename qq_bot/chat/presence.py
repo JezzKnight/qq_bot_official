@@ -94,7 +94,7 @@ class PresenceEvent:
 
 @dataclass(frozen=True)
 class PresenceConfig:
-    """参数默认值见 docs/spec/group-presence.md §7。"""
+    """参数默认值见 docs/spec/群聊存在感.md §7。"""
 
     enabled: bool = True
     rate: float = 0.2

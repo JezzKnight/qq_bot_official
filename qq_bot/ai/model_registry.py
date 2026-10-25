@@ -1,6 +1,6 @@
 """模型注册表：从 model.yaml 读取模型端点与参数，密钥仍由 .env 提供。
 
-设计要点（见 docs/note.md §81）：
+设计要点（见 docs/迭代记录.md §81）：
 - YAML 只放"参数"、不放密钥：条目用 ``api_key_env`` 指向环境变量名，值留在 .env。
   这样 model.yaml 可以安全入库，而 .env 继续被 gitignore。
 - 纯服务层：不依赖 NoneBot / pydantic，可脱离框架单独导入测试。

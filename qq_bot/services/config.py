@@ -29,7 +29,7 @@ class AiChatConfig(BaseModel):
     reply_typing_delay: bool = True  # 分条之间按字数模拟打字停顿
 
     # ── 群聊存在感（P1：0-1 抽奖 + 10 分钟窗口 + 静默 + 复读）──
-    # 设计见 docs/spec/group-presence.md；决策在 qq_bot/chat/presence.py。
+    # 设计见 docs/spec/群聊存在感.md；决策在 qq_bot/chat/presence.py。
     group_presence_enabled: bool = True  # 总开关；关掉后只落库，不接话
     group_presence_rate: float = 0.2  # 每条可接消息的抽奖概率（0-1）
     group_presence_window_sec: int = 600  # 中奖后在场窗口：10 分钟
