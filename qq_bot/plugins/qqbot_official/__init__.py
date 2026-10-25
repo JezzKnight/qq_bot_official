@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import time
+from dataclasses import replace
 
 from nonebot import get_driver, get_plugin_config, on_message, on_notice
 from nonebot.adapters.qq import (
@@ -129,11 +130,16 @@ def _event_mentions(
             continue
         data = segment.data or {}
         uid = str(data.get("user_id") or data.get("qq") or "")
-        if not uid:
-            continue
-        mentions.append(uid)
-        if uid == bot_id:
+        if uid:
+            mentions.append(uid)
+        # 全量消息模式下平台用 is_bot / is_you 标出「@ 的是机器人」
+        if data.get("is_bot") or data.get("is_you") or (uid and uid == bot_id):
             mention_bot = True
+    if not mention_bot:
+        for mention in getattr(event, "mentions", None) or []:
+            if getattr(mention, "is_you", False):
+                mention_bot = True
+                break
     return tuple(mentions), mention_bot
 
 
@@ -176,23 +182,47 @@ async def _observe_conversation(
     return mention_bot
 
 
-async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
+def _carry_last_message(incoming: Incoming) -> Incoming | None:
+    """空 @ 时把该用户上一条有内容的消息捡回来，当作本轮输入。"""
+    group_key = incoming.group_key
+    if not group_key:
+        return None
+    node = conversation.manager.last_user_node(
+        group_key, incoming.user_key, now=time.monotonic()
+    )
+    if node is None:
+        return None
+    message_id = node.mid if not node.mid.startswith("db:") else incoming.message_id
+    return replace(
+        incoming,
+        text=node.text,
+        message_id=message_id,
+        hint="（用户刚才发了这句，紧接着只 @ 了你一下，想让你回应它）",
+    )
+
+
+async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:  # noqa: C901
     incoming = qq_from_event(event, reply=QQReply(bot, event))
     config = get_plugin_config(AiChatConfig)
     mention_bot = False
     if incoming.group_key:
         mention_bot = await _observe_conversation(bot, event, incoming, config)
+    carried: Incoming | None = None
     if not incoming.text and not incoming.images:
-        if incoming.group_key and mention_bot:
-            # 空 @ 也是一次明确呼叫：先把在场窗口打开
+        if not incoming.group_key or not mention_bot:
+            await bot.send(event, MessageSegment.text("你发了个空消息 我没看懂"))
+            return
+        # 空 @：多半是在催上一条没被接的话，先把它捞回来
+        carried = _carry_last_message(incoming)
+        if carried is None:
             presence.manager.open_window(
                 incoming.group_key,
                 config=presence.config_from(config),
                 now=time.monotonic(),
                 reason="passive_empty",
             )
-        await bot.send(event, MessageSegment.text("你发了个空消息 我没看懂"))
-        return
+            await bot.send(event, MessageSegment.text("在 你说"))
+            return
 
     if incoming.group_key:
         # 登记被动窗口：@ 这一轮按最保守口径记账（假设 4 段已用满）。
@@ -214,8 +244,11 @@ async def _dispatch(bot: Bot, event: QQMessageEvent) -> None:
             # 只回执，不再走完整 turn：用户要的是「闭嘴」，不是解释。
             await incoming.reply.passive(decision.ack or "好")
             return
+    turn_incoming = carried or incoming
     try:
-        body = await asyncio.wait_for(run_turn(incoming, config=config), timeout=120)
+        body = await asyncio.wait_for(
+            run_turn(turn_incoming, config=config), timeout=120
+        )
     except asyncio.TimeoutError:
         logger.exception("QQ turn timeout after 120s")
     except Exception:

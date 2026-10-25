@@ -32,6 +32,17 @@ GROUP_TARGET = "group"
 _WHITESPACE = re.compile(r"\s+")
 _SECOND_PERSON = ("你", "你们")
 _FOLLOWUP_SEC = 120.0
+_INVITE_ENDINGS = (
+    "咋了",
+    "怎么了",
+    "什么事",
+    "啥事",
+    "在吗",
+    "你说",
+    "说吧",
+    "?",
+    "？",
+)
 _QUESTION_WORDS = ("什么", "怎么", "为什么", "哪", "谁", "几", "多少", "吗", "呢")
 _QUESTION_ENDINGS = ("吗", "呢", "?", "？")
 _MAX_PHRASE_CHARS = 16
@@ -229,7 +240,23 @@ class GroupConversation:
             return BOT_TARGET, "bot"
         return last.sender_id, last.sender_name
 
-    def resolve(
+    def last_from(
+        self,
+        user_key: str,
+        *,
+        now: float,
+        within: float = 120.0,
+    ) -> MessageNode | None:
+        """该用户最近一条有内容的消息；只认 ``within`` 秒内的。"""
+        for item in reversed(self.nodes):
+            if item.sender_id != user_key or not item.text.strip():
+                continue
+            if now - item.at > within:
+                return None
+            return item
+        return None
+
+    def resolve(  # noqa: C901 —— 规则表本身就长
         self,
         node: MessageNode,
         *,
@@ -260,6 +287,13 @@ class GroupConversation:
             and _followup_question(node)
         ):
             candidates.append((0.65, 5, BOT_TARGET, ("紧接着 bot 的追问",)))
+        if (
+            bot_prev
+            and node.at - self.last_bot_at <= _FOLLOWUP_SEC
+            and self.last_bot_text.strip().endswith(_INVITE_ENDINGS)
+        ):
+            # bot 刚问完「咋了/在吗」，下一句默认是回答 bot
+            candidates.append((0.80, 4, BOT_TARGET, ("承接 bot 的提问",)))
 
         others = [uid for uid in node.mentions if uid != self.bot_id]
         if others:
@@ -379,6 +413,19 @@ class ConversationManager:
         if conversation is None or not conversation.nodes:
             return None
         return conversation.resolve(conversation.nodes[-1], bot_names=bot_names)
+
+    def last_user_node(
+        self,
+        group_key: str,
+        user_key: str,
+        *,
+        now: float,
+        within: float = 120.0,
+    ) -> MessageNode | None:
+        conv = self._groups.get(group_key)
+        if conv is None:
+            return None
+        return conv.last_from(user_key, now=now, within=within)
 
     def topic_relevant(
         self,
