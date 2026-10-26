@@ -93,6 +93,8 @@ class ActiveReply:
 
 def reset_state() -> None:
     """清空内存状态（仅测试用；线上靠跨天/重启重置）。"""
+    for group_key in list(_pending_batches):
+        _cancel_batch(group_key)
     presence.manager.reset()
 
 
@@ -145,6 +147,142 @@ def _looks_like_mute_request(config: presence.PresenceConfig, text: str) -> bool
     return any(word in body for word in config.mute_words)
 
 
+class _DebounceBatch:
+    """一个群的待回复批次：同人新消息重置计时，他人消息只并入。"""
+
+    __slots__ = (
+        "bot",
+        "config",
+        "event",
+        "incoming",
+        "kwargs",
+        "task",
+        "texts",
+        "token",
+        "user_key",
+    )
+
+    def __init__(
+        self,
+        bot: Any,
+        event: Any,
+        incoming: Any,
+        config: Any,
+        kwargs: dict[str, Any],
+    ) -> None:
+        self.bot = bot
+        self.event = event
+        self.incoming = incoming
+        self.config = config
+        self.kwargs = kwargs
+        self.texts: list[str] = []
+        self.user_key = ""
+        self.token: object = object()
+        self.task: asyncio.Task[None] | None = None
+
+
+_pending_batches: dict[str, _DebounceBatch] = {}
+
+
+def _cancel_batch(group_key: str) -> None:
+    batch = _pending_batches.pop(group_key, None)
+    if batch is not None and batch.task is not None:
+        batch.task.cancel()
+
+
+def pending_batches(group_key: str) -> int:
+    """挂起批次里的消息数（测试/诊断用）。"""
+    batch = _pending_batches.get(group_key)
+    return len(batch.texts) if batch is not None else 0
+
+
+def _schedule_debounce(  # noqa: PLR0913
+    *,
+    bot: Any,
+    event: Any,
+    incoming: Any,
+    config: Any,
+    delay: float,
+    kwargs: dict[str, Any],
+) -> None:
+    """登记/重置一个群的待回复批次；到点由 ``_fire_batch`` 统一判定。"""
+    group_key = str(getattr(event, "group_openid", "") or "")
+    text = (incoming.text or "").strip()
+    batch = _pending_batches.get(group_key)
+    previous_user = batch.user_key if batch is not None else ""
+    if batch is None:
+        batch = _DebounceBatch(bot, event, incoming, config, kwargs)
+        _pending_batches[group_key] = batch
+    else:
+        batch.bot = bot
+        batch.event = event
+        batch.incoming = incoming
+        batch.config = config
+        batch.kwargs = kwargs
+    batch.texts.append(text)
+    same_sender = not previous_user or previous_user == incoming.user_key
+    batch.user_key = incoming.user_key
+    if not same_sender:
+        logger.info(
+            "presence debounce join group=%s user=%s msgs=%s（不重置）",
+            group_key,
+            incoming.user_key,
+            len(batch.texts),
+        )
+        return
+    if batch.task is not None:
+        batch.task.cancel()
+    token = object()
+    batch.token = token
+    batch.task = asyncio.create_task(_fire_batch(group_key, token, delay))
+    logger.info(
+        "presence debounce %s group=%s user=%s msgs=%s wait=%.1f",
+        "reset" if len(batch.texts) > 1 else "start",
+        group_key,
+        incoming.user_key,
+        len(batch.texts),
+        delay,
+    )
+
+
+async def _fire_batch(group_key: str, token: object, delay: float) -> None:
+    """计时到点：窗口还在才走一次完整判定。"""
+    try:
+        await asyncio.sleep(delay)
+    except asyncio.CancelledError:
+        return
+    batch = _pending_batches.get(group_key)
+    if batch is None or batch.token is not token:
+        return
+    _pending_batches.pop(group_key, None)
+    state = presence.manager.state_of(group_key, now=_clock(None))
+    if state is not PresenceState.AWAKE:
+        logger.info("presence debounce drop group=%s state=%s", group_key, state.value)
+        return
+    merged = " ".join(text for text in batch.texts if text).strip()
+    logger.info(
+        "presence debounce fire group=%s msgs=%s wait=%.1f",
+        group_key,
+        len(batch.texts),
+        delay,
+    )
+    try:
+        await _maybe_autotrigger(
+            batch.bot,
+            batch.event,
+            config=batch.config,
+            incoming=batch.incoming,
+            now=None,
+            decision_text=merged or None,
+            skip_debounce=True,
+            **batch.kwargs,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("presence debounce crashed (swallowed)")
+
+
 async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
     bot: Any,
     event: Any,
@@ -159,6 +297,8 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
     classify: Callable[[str, str], Awaitable[Any]] | None,
     generate: Callable[..., Awaitable[str | None]] | None,
     judge: Callable[..., Awaitable[Any]] | None,
+    decision_text: str | None = None,
+    skip_debounce: bool = False,
 ) -> bool:
     group_key = getattr(event, "group_openid", "") or ""
     if not group_key:
@@ -175,7 +315,35 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
 
     clock = _clock(now)
     presence_event = _presence_event(event, incoming, cfg)
+    if decision_text:
+        merged = decision_text.strip()
+        if merged:
+            presence_event = replace(presence_event, text=merged)
     keyword_awake = False
+
+    if (
+        not skip_debounce
+        and cfg.debounce_sec > 0
+        and presence.manager.state_of(group_key, now=clock) is PresenceState.AWAKE
+        and not presence_event.mentions_other
+    ):
+        _schedule_debounce(
+            bot=bot,
+            event=event,
+            incoming=incoming,
+            config=config,
+            delay=cfg.debounce_sec,
+            kwargs={
+                "dispatch": dispatch,
+                "send_text": send_text,
+                "send_repeat": send_repeat,
+                "classify": classify,
+                "generate": generate,
+                "judge": judge,
+                "roll": roll,
+            },
+        )
+        return False
 
     keyword = relevance.find_keyword(presence_event.text, cfg.keywords)
     if keyword and not presence_event.is_command and not presence_event.mentions_other:
@@ -243,7 +411,7 @@ async def _maybe_autotrigger(  # noqa: C901, PLR0911, PLR0912, PLR0913
             return False
         # 明确让人闭嘴就闭嘴，不因为活跃期硬回。
         if not presence_event.mentions_other and _looks_like_mute_request(
-            cfg, incoming.text
+            cfg, presence_event.text
         ):
             presence.manager.observe_passive(
                 group_key=group_key,

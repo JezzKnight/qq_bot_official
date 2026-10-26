@@ -32,6 +32,7 @@ def cfg(**overrides: object) -> SimpleNamespace:
         "group_presence_window_sec": 600,
         "group_presence_rate_in_window": 2.0,
         "group_presence_active_grace_sec": 180,
+        "group_presence_debounce_sec": 0,
         "group_presence_reply_cooldown_sec": 15,
         "group_presence_wake_cooldown_sec": 300,
         "group_presence_daily_active": 120,

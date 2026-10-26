@@ -101,6 +101,7 @@ class PresenceConfig:
     window_sec: float = 600.0
     rate_in_window: float = 2.0
     active_grace_sec: float = 180.0
+    debounce_sec: float = 5.0
     reply_cooldown_sec: float = 45.0
     wake_cooldown_sec: float = 300.0
     daily_active: int = 120
@@ -774,6 +775,7 @@ def config_from(settings: Any) -> PresenceConfig:
         window_sec=float(get("group_presence_window_sec", 600)),
         rate_in_window=float(get("group_presence_rate_in_window", 2.0)),
         active_grace_sec=float(get("group_presence_active_grace_sec", 180)),
+        debounce_sec=float(get("group_presence_debounce_sec", 5)),
         reply_cooldown_sec=float(get("group_presence_reply_cooldown_sec", 45)),
         wake_cooldown_sec=float(get("group_presence_wake_cooldown_sec", 300)),
         daily_active=int(get("group_presence_daily_active", 120)),
