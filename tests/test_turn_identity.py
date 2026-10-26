@@ -8,14 +8,15 @@ from qq_bot.chat.turn import _annotate_history
 
 def test_user_message_gets_identity_prefix() -> None:
     history = [ChatMessage(role="user", sender_name="小明", content="我钓了三斤")]
-    annotated = _annotate_history(history)
+    annotated, aliases = _annotate_history(history)
     assert annotated[0].content == '<user identity name="小明"/>\n我钓了三斤'
     assert annotated[0].sender_name == "小明"
+    assert aliases == {}
 
 
 def test_missing_name_falls_back_to_member() -> None:
     history = [ChatMessage(role="user", content="在吗")]
-    annotated = _annotate_history(history)
+    annotated, _aliases = _annotate_history(history)
     assert annotated[0].content == '<user identity name="某成员"/>\n在吗'
 
 
@@ -26,10 +27,11 @@ def test_assistant_and_already_tagged_messages_untouched() -> None:
         ChatMessage(role="user", sender_name="阿强", content=tagged),
         ChatMessage(role="user", sender_name="小明", content=None),
     ]
-    annotated = _annotate_history(history)
+    annotated, aliases = _annotate_history(history)
     assert annotated[0].content == "牛啊"
     assert annotated[1].content == tagged
     assert annotated[2].content is None
+    assert aliases == {}
 
 
 def test_identity_tag_includes_sender_id() -> None:
@@ -38,5 +40,35 @@ def test_identity_tag_includes_sender_id() -> None:
             role="user", sender_name="小明", sender_id="U1", content="我钓了三斤"
         )
     ]
-    annotated = _annotate_history(history)
+    annotated, aliases = _annotate_history(history)
     assert annotated[0].content == '<user identity name="小明" id="U1"/>\n我钓了三斤'
+    assert aliases == {}
+
+
+def test_identity_tag_carries_quote_alias() -> None:
+    history = [
+        ChatMessage(
+            role="user",
+            sender_name="AMelax",
+            sender_id="U2",
+            content="给口",
+            external_id="ROBOT1.0_abc",
+        )
+    ]
+    annotated, aliases = _annotate_history(history)
+    content = annotated[0].content
+    assert ' m="' in content
+    alias = content.split(' m="', 1)[1].split('"', 1)[0]
+    assert len(alias) == 4
+    assert aliases == {alias: "ROBOT1.0_abc"}
+
+
+def test_assistant_message_gets_no_alias() -> None:
+    history = [
+        ChatMessage(
+            role="assistant", content="来了", external_id="ROBOT1.0_bot"
+        )
+    ]
+    annotated, aliases = _annotate_history(history)
+    assert annotated[0].content == "来了"
+    assert aliases == {}

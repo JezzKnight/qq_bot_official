@@ -28,6 +28,7 @@ class AiChatConfig(BaseModel):
     # ── 回复节奏（活人感：像 QQ 连发，而不是一次吐一屏）──
     reply_typing_delay: bool = True  # 分条之间按字数模拟打字停顿
     query_markdown_enabled: bool = True  # 查询/攻略类回答用 Markdown 消息，失败回退文本
+    quote_reply_enabled: bool = True  # 允许用 <quote> 标签引用别人的历史消息
 
     # ── 群聊存在感（P1：0-1 抽奖 + 10 分钟窗口 + 静默 + 复读）──
     # 设计见 docs/spec/群聊存在感.md；决策在 qq_bot/chat/presence.py。

@@ -61,10 +61,12 @@ class ActiveReply:
         send: Callable[[str], Awaitable[None]],
         send_image: Callable[[bytes, str], Awaitable[None]] | None = None,
         send_markdown: Callable[[str], Awaitable[None]] | None = None,
+        send_quote: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> None:
         self._send = send
         self._send_image = send_image
         self._send_markdown = send_markdown
+        self._send_quote = send_quote
 
     async def text(self, content: str) -> None:
         await self._send(content)
@@ -75,6 +77,13 @@ class ActiveReply:
     async def mention(self, _user_key: str, content: str) -> None:
         # 顺嘴接话不 @ 人
         await self._send(content)
+
+    async def quote(self, message_id: str, content: str) -> None:
+        """引用某条历史消息再说话；没有引用通道时退回普通主动消息。"""
+        if self._send_quote is not None:
+            await self._send_quote(message_id, content)
+        else:
+            await self._send(content)
 
     async def image(self, data: bytes, name: str = "") -> None:
         if self._send_image is not None:
@@ -524,6 +533,7 @@ async def _speak(  # noqa: PLR0913
                     sender,
                     _proactive_image(bot, event),
                     _proactive_markdown(bot, event),
+                    _proactive_quote(bot, event),
                 ),
             )
             body = await asyncio.wait_for(
@@ -859,6 +869,29 @@ def _proactive_markdown(bot: Any, event: Any) -> Callable[[str], Awaitable[None]
             group_openid=event.group_openid,
             message=MessageSegment.markdown(content),
         )
+
+    return send
+
+
+def _proactive_quote(
+    bot: Any, event: Any
+) -> Callable[[str, str], Awaitable[None]]:
+    """引用某条历史消息的主动发送；失败降级为普通主动消息。"""
+
+    async def send(message_id: str, content: str) -> None:
+        from nonebot.adapters.qq import Message, MessageSegment
+
+        from qq_bot.platform.qqbot.reply import normalize_typing
+
+        text = MessageSegment.text(normalize_typing(content))
+        try:
+            await bot.send_to_group(
+                group_openid=event.group_openid,
+                message=Message([MessageSegment.reference(message_id), text]),
+            )
+        except Exception:
+            logger.warning("presence quote 发送失败，退化为普通消息", exc_info=True)
+            await bot.send_to_group(group_openid=event.group_openid, message=text)
 
     return send
 

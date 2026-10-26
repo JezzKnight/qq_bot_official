@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from prompts.service import prompt_service
 from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
+from qq_bot.chat import quote
 from qq_bot.chat.persist import persist_turn, persist_user
 from qq_bot.chat.prompt import SystemPromptParts, build_system_prompt
 from qq_bot.chat.query_mode import is_query_question
@@ -127,12 +128,17 @@ async def _reply_video_ack(reply: Any) -> None:
 
 
 
-def _annotate_history(history: list[ChatMessage]) -> list[ChatMessage]:
-    """给群历史里的用户消息补发送者标签。
+def _annotate_history(
+    history: list[ChatMessage],
+) -> tuple[list[ChatMessage], dict[str, str]]:
+    """给群历史里的用户消息补发送者标签与引用短别名。
 
     只影响拼给模型的 prompt，不落库；兼容已被标注过的旧数据。
+    返回 (标注后的历史, 别名 -> external_id)。
     """
     annotated: list[ChatMessage] = []
+    aliases: dict[str, str] = {}
+    taken: set[str] = set()
     for message in history:
         if (
             message.role != "user"
@@ -143,15 +149,18 @@ def _annotate_history(history: list[ChatMessage]) -> list[ChatMessage]:
             continue
         name = escape_for_prompt(message.sender_name or "某成员")
         uid = escape_for_prompt(message.sender_id or "")
-        identity = (
-            f'<user identity name="{name}" id="{uid}"/>'
-            if uid
-            else f'<user identity name="{name}"/>'
-        )
+        attrs = f'name="{name}"'
+        if uid:
+            attrs += f' id="{uid}"'
+        if message.external_id:
+            alias = quote.make_alias(taken)
+            taken.add(alias)
+            aliases[alias] = message.external_id
+            attrs += f' m="{alias}"'
         annotated.append(
-            replace(message, content=f"{identity}\n{message.content}")
+            replace(message, content=f"<user identity {attrs}/>\n{message.content}")
         )
-    return annotated
+    return annotated, aliases
 
 
 async def run_turn(incoming: Incoming, *, config: Any) -> str:
@@ -265,8 +274,9 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     )
 
     history = parts.as_history()
+    quote_targets: dict[str, str] = {}
     if is_group:
-        history = _annotate_history(history)
+        history, quote_targets = _annotate_history(history)
     messages = [ChatMessage(role="system", content=final_prompt)]
     messages.extend(history)
 
@@ -484,6 +494,31 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     else:
         final_content = FALLBACK_TEXT
 
+    assistant_text = final_content
+    quote_mid: str | None = None
+    quote_text = ""
+    if is_group and getattr(config, "quote_reply_enabled", True):
+        parsed = quote.parse_quoted_reply(final_content)
+        if parsed is not None:
+            joined = parsed.quoted_body + (
+                "\n\n" + parsed.rest_body if parsed.rest_body else ""
+            )
+            mid = quote_targets.get(parsed.alias)
+            if mid:
+                quote_mid = mid
+                quote_text = parsed.quoted_body
+                final_content = parsed.rest_body
+                assistant_text = joined
+                logger.info(
+                    "TURN quote alias=%s target=…%s",
+                    parsed.alias,
+                    quote_mid[-8:],
+                )
+            else:
+                final_content = joined
+                assistant_text = joined
+                logger.info("TURN quote unmatched alias=%s", parsed.alias)
+
     pending_sticker = current_pending_sticker.get()
     current_pending_sticker.set(None)
     video_note = "\n\n".join(video_notes)
@@ -497,7 +532,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         sender_id=uid,
         sender_name=sender_name,
         user_text=f"{identity_tag}\n{incoming.text}",
-        assistant_text=final_content,
+        assistant_text=assistant_text,
         extra_assistant_text=None,
         tool_trace=tool_trace,
         usage=usage_context.snapshot(),
@@ -513,9 +548,26 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         # 给表情包留一次发送额度
         max_parts -= 1
 
+    if quote_mid is not None:
+        quote_sender = getattr(incoming.reply, "quote", None)
+        if quote_sender is None:
+            final_content = quote_text + (
+                "\n\n" + final_content if final_content else ""
+            )
+            quote_mid = None
+        else:
+            try:
+                await quote_sender(quote_mid, quote_text)
+            except Exception:  # 引用失败不拖垮本轮，降级为一条普通消息
+                logger.warning("引用消息发送失败，按普通消息发送", exc_info=True)
+                final_content = quote_text + (
+                    "\n\n" + final_content if final_content else ""
+                )
+                quote_mid = None
+
     markdown_sent = False
     markdown = getattr(incoming.reply, "markdown", None)
-    if (
+    if final_content and (
         mode_part
         and markdown is not None
         and getattr(config, "query_markdown_enabled", True)
@@ -527,7 +579,7 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         except Exception:  # 发送失败只降级，不影响本轮
             logger.warning("查询模式 Markdown 发送失败，回退文本分段", exc_info=True)
 
-    if not markdown_sent:
+    if final_content and not markdown_sent:
         chunks = split_for_reply(final_content, max_parts=max_parts)
         await send_reply_chunks(
             incoming.reply,
@@ -537,4 +589,4 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
         )
     await _send_pending_sticker(incoming.reply, pending_sticker)
     await incoming.reply.finish()
-    return final_content
+    return assistant_text

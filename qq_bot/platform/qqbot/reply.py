@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from nonebot.adapters.qq import MessageSegment
+from nonebot.adapters.qq import Message, MessageSegment
 from nonebot.adapters.qq.exception import ActionFailed
 
 if TYPE_CHECKING:
@@ -115,6 +115,28 @@ class QQReply:
                 raise
             logger.warning("QQ Markdown 被动发送失败，改走主动", exc_info=True)
             await self._send(seg, passive=False)
+
+    async def quote(self, message_id: str, content: str) -> None:
+        """发一条「引用某条消息 + 正文」的主动消息；失败降级为普通主动消息。"""
+        group_openid = getattr(self._event, "group_openid", None)
+        if not group_openid:
+            await self.text(content)
+            return
+        message = Message(
+            [
+                MessageSegment.reference(message_id),
+                MessageSegment.text(normalize_typing(content)),
+            ]
+        )
+        logger.info("QQ quote send message_id=…%s", message_id[-12:])
+        try:
+            await asyncio.wait_for(
+                self._bot.send_to_group(group_openid=group_openid, message=message),
+                SEND_TIMEOUT,
+            )
+        except Exception:
+            logger.warning("QQ 引用消息发送失败，降级为普通主动消息", exc_info=True)
+            await self.text(content)
 
     async def image(self, data: bytes, name: str = "") -> bool:
         """发送图片；内容违规时只提示一次并返回 False，调用方可提前结束批量发图。"""
