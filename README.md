@@ -74,14 +74,17 @@ sudo apt install -y git ffmpeg
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 git clone <仓库地址> /opt/qq_bot_official && cd /opt/qq_bot_official
-uv sync --frozen
+# 国内机器建议加镜像并放宽超时，避免拉 dev 依赖时超时
+export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+export UV_HTTP_TIMEOUT=300
+uv sync --frozen --no-dev          # 只装运行时依赖，不装 pytest/ruff
 
 cp .env.example .env && chmod 600 .env
 # 必改：QQ_BOTS、QQ_IS_SANDBOX=false、HOST=127.0.0.1（不要 0.0.0.0）、
 #      PG_*（指向 Docker 发布的 127.0.0.1:5432）、各 API Key、ADMIN_OPENIDS
 
-uv run python scripts/init_db.py      # 建库（角色沿用 PG_USER；--create-user 可代建）
-./run_bot.sh                          # 首次启动时自动建表，无需手动执行 SQL
+.venv/bin/python scripts/init_db.py    # 建库（角色沿用 PG_USER；--create-user 可代建）
+./run_bot.sh                           # 首次启动时自动建表，无需手动执行 SQL
 ```
 
 - 表结构由 `qq_bot/memory/migrate.py` 在首次连库时按 `schema/v*.sql` 增量创建，重复启动幂等。
