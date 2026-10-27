@@ -152,7 +152,6 @@ scripts/
 AGENTS.md
 CLAUDE.md
 run_bot.bat
-run_bot.sh
 
 
 # QQ 开放平台本地配置（含 AppSecret）
