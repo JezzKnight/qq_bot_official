@@ -64,3 +64,28 @@ prompts/chat/           # chain.yaml + 各模块
 - 被动回复每条消息有次数上限（当前按 4 段控制）
 - 定时提醒/主动消息未实现（相关工具与调度代码已移除）
 - 视频工具：单次最多 30 分钟 / 512MB、默认 12 帧；无 ASR，B 站 AI 字幕需要 Cookie；抖音未重点验证
+
+## 部署到服务器（固定 IP + Docker PostgreSQL + systemd）
+
+只需要 `git`、`uv`，视频功能额外要 `ffmpeg`：
+
+```bash
+sudo apt install -y git ffmpeg
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+git clone <仓库地址> /opt/qq_bot_official && cd /opt/qq_bot_official
+uv sync --frozen
+
+cp .env.example .env && chmod 600 .env
+# 必改：QQ_BOTS、QQ_IS_SANDBOX=false、HOST=127.0.0.1（不要 0.0.0.0）、
+#      PG_*（指向 Docker 发布的 127.0.0.1:5432）、各 API Key、ADMIN_OPENIDS
+
+uv run python scripts/init_db.py      # 建库（角色沿用 PG_USER；--create-user 可代建）
+./run_bot.sh                          # 首次启动时自动建表，无需手动执行 SQL
+```
+
+- 表结构由 `qq_bot/memory/migrate.py` 在首次连库时按 `schema/v*.sql` 增量创建，重复启动幂等。
+- `deploy/qqbot.service` 是 systemd 模板：复制到 `/etc/systemd/system/` 后 `enable --now`。
+- QQ 开放平台 → 开发设置 → IP 白名单 填服务器固定公网 IP；群主需开启「接收全量消息」。
+- 日常升级：`git pull && uv sync --frozen && sudo systemctl restart qqbot`。
+

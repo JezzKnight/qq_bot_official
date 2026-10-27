@@ -118,6 +118,7 @@ allowed-confusables = ["，", "。", "“", "”", "：", "；", "？", "！", "
 # 测试代码不强制类型注解与简化风格：夹具参数是 pytest 注入的
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "SIM", "PLR2004"]
+"scripts/init_db.py" = ["T201", "BLE001"]
 
 [tool.ruff.lint.pyupgrade]
 keep-runtime-typing = true

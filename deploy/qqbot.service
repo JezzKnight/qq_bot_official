@@ -1,0 +1,17 @@
+[Unit]
+Description=QQ Bot (qq_bot_official)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qqbot
+WorkingDirectory=/opt/qq_bot_official
+Environment=TZ=Asia/Shanghai
+ExecStart=/opt/qq_bot_official/run_bot.sh
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
