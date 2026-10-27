@@ -116,11 +116,20 @@ class VideoAgent:
         ) as client:
             try:
                 if source.video_id.startswith("av"):
-                    meta = await fetch_meta(client, aid=int(source.video_id[2:]))
+                    meta = await fetch_meta(
+                        client,
+                        aid=int(source.video_id[2:]),
+                        cookie=self.config.bilibili_cookie,
+                    )
                 else:
-                    meta = await fetch_meta(client, bvid=source.video_id)
+                    meta = await fetch_meta(
+                        client,
+                        bvid=source.video_id,
+                        cookie=self.config.bilibili_cookie,
+                    )
             except (BilibiliError, httpx.HTTPError, ValueError) as exc:
-                return "", "", [f"B 站元数据读取失败: {type(exc).__name__}"], "", "", 0
+                detail = str(exc).strip() or type(exc).__name__
+                return "", "", [f"B 站元数据读取失败: {detail[:120]}"], "", "", 0
             text, lang, warnings = await fetch_subtitles(
                 client,
                 meta,

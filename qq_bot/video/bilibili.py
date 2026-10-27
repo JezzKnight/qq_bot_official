@@ -124,16 +124,48 @@ async def resolve_b23(client: httpx.AsyncClient, url: str) -> str:
         return url
 
 
+async def _prime_buvid(
+    client: httpx.AsyncClient, *, bvid: str = "", aid: int | None = None
+) -> None:
+    """先访问视频页，让 B 站下发 buvid3 等风控 Cookie（匿名 412 时用）。"""
+    target = (
+        f"https://www.bilibili.com/video/{bvid}/"
+        if bvid
+        else f"https://www.bilibili.com/video/av{aid}/"
+    )
+    try:
+        await client.get(target, headers=_HEADERS)
+    except httpx.HTTPError:
+        logger.debug("B 站 Cookie 预热失败: %s", target, exc_info=True)
+
+
 async def fetch_meta(
     client: httpx.AsyncClient,
     *,
     bvid: str = "",
     aid: int | None = None,
+    cookie: str = "",
 ) -> BilibiliMeta:
     params: dict[str, Any] = {"bvid": bvid} if bvid else {"aid": aid}
+    headers = dict(_HEADERS)
+    cookie_header = _cookie_header(cookie)
+    if cookie_header:
+        headers["Cookie"] = cookie_header
     resp = await client.get(
-        f"{_API}/x/web-interface/view", params=params, headers=_HEADERS
+        f"{_API}/x/web-interface/view", params=params, headers=headers
     )
+    if resp.status_code == httpx.codes.PRECONDITION_FAILED and not cookie_header:
+        # 机房 IP 匿名请求常被 B 站风控为 412：先拿 buvid3 再试一次。
+        await _prime_buvid(client, bvid=bvid, aid=aid)
+        resp = await client.get(
+            f"{_API}/x/web-interface/view", params=params, headers=headers
+        )
+    if resp.status_code == httpx.codes.PRECONDITION_FAILED:
+        msg = (
+            "B 站风控拦截（412）：请在 .env 配置 BILIBILI_COOKIE，"
+            "或让 B 站请求走非机房出口"
+        )
+        raise BilibiliError(msg)
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != _JSON_OK:
