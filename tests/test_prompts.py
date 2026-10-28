@@ -16,7 +16,6 @@ HEADS = [
     "# 大肥鱼",
     "# 群聊里的相处方式",
     "# 不确定的时候",
-    "# 底线",
     "# QQ 群聊限制",
     "# 图片和表情包",
     "# 说话方式",
@@ -24,7 +23,7 @@ HEADS = [
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 11
+    assert prompt_service.chain_version == 12
     assert [ref.name for ref in prompt_service.modules] == ["system"]
     assert prompt_service.modules[0].version == "v1"
 
