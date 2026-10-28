@@ -24,7 +24,7 @@ HEADS = [
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 10
+    assert prompt_service.chain_version == 11
     assert [ref.name for ref in prompt_service.modules] == ["system"]
     assert prompt_service.modules[0].version == "v1"
 

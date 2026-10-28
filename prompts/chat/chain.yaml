@@ -1,7 +1,7 @@
-# chat 系统提示词链路 v9（QQ 专用，大肥鱼人设）
+# chat 系统提示词链路 v11（QQ 专用，大肥鱼人设）
 # v9 起所有系统提示词模块合并进 chat/system.md，一个文件从头读到尾；
 # group.md（群聊身份规则）与 keyword_transition.md（过渡句模板）是独立调用，不在此链路内。
 # modules 的顺序就是拼接顺序；条目格式为 name.version，name 对应 chat/{name}.md。
-version: 10
+version: 11
 modules:
   - system.v1
