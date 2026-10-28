@@ -101,7 +101,7 @@ class PresenceConfig:
     window_sec: float = 600.0
     rate_in_window: float = 2.0
     active_grace_sec: float = 180.0
-    debounce_sec: float = 5.0
+    debounce_sec: float = 8.0
     reply_cooldown_sec: float = 45.0
     wake_cooldown_sec: float = 300.0
     daily_active: int = 120

@@ -250,3 +250,7 @@ async def test_decision_uses_merged_text(monkeypatch: pytest.MonkeyPatch) -> Non
     assert seen == ["大肥鱼 在吗"]  # 判定用拼接文本
     assert calls == ["在吗"]  # turn 仍用最后一条，前文在历史里
     assert presence.manager.state_of("g1", now=time.monotonic()) is PresenceState.AWAKE
+
+
+def test_default_debounce_is_eight_seconds() -> None:
+    assert presence.PresenceConfig().debounce_sec == 8.0

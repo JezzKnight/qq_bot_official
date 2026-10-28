@@ -55,6 +55,7 @@ class Incoming:
     reply: ReplyTarget
     caps: PlatformCaps
     hint: str = ""  # 仅给本轮 system prompt 的旁注，不写进用户原文
+    auto_reply: bool = False  # 自动接话（非被动回复）时置 True
 
     @property
     def is_group(self) -> bool:

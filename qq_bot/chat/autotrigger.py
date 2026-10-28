@@ -529,6 +529,7 @@ async def _speak(  # noqa: PLR0913
             auto_incoming = replace(
                 incoming,
                 hint=hint,
+                auto_reply=True,
                 reply=ActiveReply(
                     sender,
                     _proactive_image(bot, event),

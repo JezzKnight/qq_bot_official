@@ -122,3 +122,19 @@ def test_active_reply_quote_falls_back_to_text() -> None:
     reply = ActiveReply(send_text)
     asyncio.run(reply.quote("m1", "没有引用通道"))
     assert texts == ["没有引用通道"]
+
+
+def test_needs_auto_quote_only_when_newer_message() -> None:
+    base = {
+        "enabled": True,
+        "is_group": True,
+        "auto_reply": True,
+        "trigger_mid": "m1",
+        "latest_mid": "m2",
+    }
+    assert quote_mod.needs_auto_quote(**base)
+    assert not quote_mod.needs_auto_quote(**{**base, "latest_mid": "m1"})
+    assert not quote_mod.needs_auto_quote(**{**base, "latest_mid": ""})
+    assert not quote_mod.needs_auto_quote(**{**base, "auto_reply": False})
+    assert not quote_mod.needs_auto_quote(**{**base, "is_group": False})
+    assert not quote_mod.needs_auto_quote(**{**base, "enabled": False})

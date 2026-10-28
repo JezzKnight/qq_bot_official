@@ -315,3 +315,17 @@ def test_last_user_node_returns_recent_message() -> None:
     assert node.mid == "m1"
     assert manager.last_user_node("g1", "U1", now=300.0) is None
     assert manager.last_user_node("g1", "U2", now=110.0) is None
+
+
+def test_latest_user_mid_tracks_newest_message() -> None:
+    manager = ConversationManager()
+    assert manager.latest_user_mid("g1") == ""
+    manager.observe(
+        group_key="g1", user_key="U1", name="小明", text="一",
+        message_id="m1", at=100.0,
+    )
+    manager.observe(
+        group_key="g1", user_key="U2", name="AMelax", text="二",
+        message_id="m2", at=101.0,
+    )
+    assert manager.latest_user_mid("g1") == "m2"

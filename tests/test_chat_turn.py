@@ -231,3 +231,76 @@ def test_compression_enabled_with_full_group_access() -> None:
         ),
     )
     assert turn_mod._compression_scheduler(incoming) is not None
+
+
+class QuoteReply(FakeReply):
+    def __init__(self) -> None:
+        super().__init__()
+        self.quoted: list[tuple[str, str]] = []
+
+    async def quote(self, message_id: str, content: str) -> None:
+        self.quoted.append((message_id, content))
+
+
+def _observe_pair(group: str) -> None:
+    from qq_bot.chat import conversation
+
+    conversation.manager.reset()
+    conversation.manager.observe(
+        group_key=group,
+        user_key="openid-a",
+        name="小明",
+        text="今晚吃什么",
+        message_id="m1",
+        at=100.0,
+    )
+    conversation.manager.observe(
+        group_key=group,
+        user_key="openid-b",
+        name="AMelax",
+        text="随便",
+        message_id="m2",
+        at=101.0,
+    )
+
+
+async def test_auto_quote_when_newer_message_arrived(patched) -> None:  # noqa: ARG001
+    group = "795245302"
+    _observe_pair(group)
+    reply = QuoteReply()
+    incoming = dataclasses.replace(
+        _incoming(reply, group=group), message_id="m1", auto_reply=True
+    )
+    config = _config()
+    config.quote_reply_enabled = True
+    config.quote_race_enabled = True
+    config.query_markdown_enabled = False
+    try:
+        await turn_mod.run_turn(incoming, config=config)
+    finally:
+        from qq_bot.chat import conversation
+
+        conversation.manager.reset()
+    assert reply.quoted == [("m1", "你好呀")]
+    assert ("text", "你好呀") not in reply.sent
+
+
+async def test_no_auto_quote_when_trigger_is_latest(patched) -> None:  # noqa: ARG001
+    group = "795245303"
+    _observe_pair(group)
+    reply = QuoteReply()
+    incoming = dataclasses.replace(
+        _incoming(reply, group=group), message_id="m2", auto_reply=True
+    )
+    config = _config()
+    config.quote_reply_enabled = True
+    config.quote_race_enabled = True
+    config.query_markdown_enabled = False
+    try:
+        await turn_mod.run_turn(incoming, config=config)
+    finally:
+        from qq_bot.chat import conversation
+
+        conversation.manager.reset()
+    assert reply.quoted == []
+    assert any(kind in ("text", "mention") for kind, _ in reply.sent)

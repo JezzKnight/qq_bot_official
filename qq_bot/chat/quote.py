@@ -37,6 +37,24 @@ def make_alias(taken: set[str]) -> str:
             return alias
 
 
+def needs_auto_quote(
+    *,
+    enabled: bool,
+    is_group: bool,
+    auto_reply: bool,
+    trigger_mid: str,
+    latest_mid: str,
+) -> bool:
+    """发送前发现群里已有更新的消息时，自动引用触发本轮的那条。"""
+    return bool(
+        enabled
+        and is_group
+        and auto_reply
+        and latest_mid
+        and latest_mid != trigger_mid
+    )
+
+
 def parse_quoted_reply(text: str) -> QuotedReply | None:
     """解析开头的 ``<quote m="xxxx"/>``；没有标签或格式不完整时返回 None。"""
     raw = (text or "").strip()

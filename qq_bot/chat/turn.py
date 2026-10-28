@@ -16,6 +16,7 @@ from prompts.service import prompt_service
 from qq_bot.ai import usage_context
 from qq_bot.ai.types import ChatMessage
 from qq_bot.chat import quote
+from qq_bot.chat.conversation import manager as conversation_manager
 from qq_bot.chat.persist import persist_turn, persist_user
 from qq_bot.chat.prompt import SystemPromptParts, build_system_prompt
 from qq_bot.chat.query_mode import is_query_question
@@ -519,6 +520,22 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
                 assistant_text = joined
                 logger.info("TURN quote unmatched alias=%s", parsed.alias)
 
+    auto_quote_mid: str | None = None
+    if (
+        is_group
+        and quote_mid is None
+        and final_content
+        and quote.needs_auto_quote(
+            enabled=getattr(config, "quote_race_enabled", True),
+            is_group=is_group,
+            auto_reply=incoming.auto_reply,
+            trigger_mid=incoming.message_id,
+            latest_mid=conversation_manager.latest_user_mid(incoming.group_key or ""),
+        )
+    ):
+        auto_quote_mid = incoming.message_id
+        logger.info("TURN auto_quote trigger=…%s", auto_quote_mid[-8:])
+
     pending_sticker = current_pending_sticker.get()
     current_pending_sticker.set(None)
     video_note = "\n\n".join(video_notes)
@@ -581,12 +598,22 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
 
     if final_content and not markdown_sent:
         chunks = split_for_reply(final_content, max_parts=max_parts)
-        await send_reply_chunks(
-            incoming.reply,
-            chunks,
-            mention_user_key=incoming.user_key if is_group else None,
-            simulate_typing=getattr(config, "reply_typing_delay", True),
-        )
+        if auto_quote_mid is not None and chunks:
+            quote_sender = getattr(incoming.reply, "quote", None)
+            if quote_sender is not None:
+                try:
+                    await quote_sender(auto_quote_mid, chunks[0])
+                    chunks = chunks[1:]
+                    logger.info("TURN auto_quote sent")
+                except Exception:  # 引用失败不拖垮本轮，按普通消息发
+                    logger.warning("抢答自动引用失败，按普通消息发送", exc_info=True)
+        if chunks:
+            await send_reply_chunks(
+                incoming.reply,
+                chunks,
+                mention_user_key=incoming.user_key if is_group else None,
+                simulate_typing=getattr(config, "reply_typing_delay", True),
+            )
     await _send_pending_sticker(incoming.reply, pending_sticker)
     await incoming.reply.finish()
     return assistant_text

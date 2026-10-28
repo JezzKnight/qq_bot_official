@@ -230,6 +230,10 @@ class GroupConversation:
         group_tokens = frozenset().union(*(item.tokens for item in recent))
         return len(node.tokens & group_tokens) >= min_overlap
 
+    def latest_user_mid(self) -> str:
+        """最近一条用户消息的 mid；没有则为空串。"""
+        return self.nodes[-1].mid if self.nodes else ""
+
     def prev_speaker(self, node: MessageNode) -> tuple[str, str]:
         """返回 (openid, 显示名)；bot 用 ``BOT_TARGET`` 表示。"""
         others = [item for item in self.nodes if item.mid != node.mid]
@@ -402,6 +406,13 @@ class ConversationManager:
         if conversation is None:
             return 0
         return conversation.ledger.count_of(user_key, text)
+
+    def latest_user_mid(self, group_key: str) -> str:
+        """群里最近一条用户消息的 mid（用于发送前的抢答检测）。"""
+        conversation = self._groups.get(group_key)
+        if conversation is None:
+            return ""
+        return conversation.latest_user_mid()
 
     def addressee(
         self,
