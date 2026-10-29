@@ -31,7 +31,7 @@ from qq_bot.media.download import download_image
 from qq_bot.memory.assembler import ContextParts, build_context, trim_messages
 from qq_bot.memory.members import members_xml
 from qq_bot.memory.memory_config import get_memory_config
-from qq_bot.memory.naming import escape_for_prompt
+from qq_bot.memory.naming import escape_for_prompt, rewrite_names
 from qq_bot.platform.reply import send_reply_chunks, split_for_reply
 from qq_bot.search.retry import RETRY_ACK, looks_insufficient
 from qq_bot.services import token_usage
@@ -535,6 +535,19 @@ async def _run_turn(  # noqa: C901, PLR0912, PLR0915 —— 迁移自 handler �
     ):
         auto_quote_mid = incoming.message_id
         logger.info("TURN auto_quote trigger=…%s", auto_quote_mid[-8:])
+
+    if is_group and getattr(config, "name_rewrite_enabled", True):
+        final_content, renamed = await rewrite_names(
+            memory, group_id=gid, text=final_content
+        )
+        if renamed:
+            assistant_text, _ = await rewrite_names(
+                memory, group_id=gid, text=assistant_text
+            )
+            logger.info(
+                "TURN rename %s",
+                "、".join(f"{old}→{new}" for old, new in dict(renamed).items()),
+            )
 
     pending_sticker = current_pending_sticker.get()
     current_pending_sticker.set(None)

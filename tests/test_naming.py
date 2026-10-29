@@ -7,6 +7,7 @@ from qq_bot.memory.naming import (
     escape_for_prompt,
     normalize,
     resolve_mentions,
+    rewrite_names,
     set_my_name,
 )
 
@@ -108,3 +109,67 @@ def test_escape_for_prompt_blocks_structure_breaks() -> None:
     assert escape_for_prompt('a"b<c>') == "a&quot;b&lt;c&gt;"
     assert "\n" not in escape_for_prompt("a\nb")
     assert len(escape_for_prompt("字" * 200)) <= 64
+
+
+async def test_rewrite_uses_preferred_name(repo) -> None:
+    await repo.upsert_members(
+        "G100", [{"user_id": "U7", "card": "张三", "nickname": "zs"}]
+    )
+    await set_my_name(repo, user_id="U7", group_id="G100", name="狗哥")
+    text, changes = await rewrite_names(
+        repo, group_id="G100", text="张三来了，张三说他饿了"
+    )
+    assert text == "狗哥来了，狗哥说他饿了"
+    assert changes == [("张三", "狗哥"), ("张三", "狗哥")]
+
+
+async def test_rewrite_keeps_old_alias(repo) -> None:
+    await set_my_name(repo, user_id="U7", group_id="G100", name="阿强")
+    await set_my_name(repo, user_id="U7", group_id="G100", name="狗哥")
+    text, _ = await rewrite_names(repo, group_id="G100", text="阿强呢")
+    assert text == "狗哥呢"
+
+
+async def test_rewrite_skips_users_without_preferred(repo) -> None:
+    await repo.upsert_members(
+        "G100", [{"user_id": "U8", "card": "小明", "nickname": "xm"}]
+    )
+    text, changes = await rewrite_names(repo, group_id="G100", text="小明在吗")
+    assert text == "小明在吗"
+    assert changes == []
+
+
+async def test_rewrite_skips_same_name(repo) -> None:
+    await set_my_name(repo, user_id="U7", group_id="G100", name="狗哥")
+    text, changes = await rewrite_names(repo, group_id="G100", text="狗哥在吗")
+    assert text == "狗哥在吗"
+    assert changes == []
+
+
+async def test_rewrite_skips_ambiguous_names(repo) -> None:
+    await repo.upsert_members(
+        "G100",
+        [
+            {"user_id": "U7", "card": "小明", "nickname": "a"},
+            {"user_id": "U8", "card": "小明", "nickname": "b"},
+        ],
+    )
+    text, changes = await rewrite_names(repo, group_id="G100", text="小明在吗")
+    assert text == "小明在吗"
+    assert changes == []
+
+
+async def test_rewrite_keeps_ascii_word_boundary(repo) -> None:
+    await repo.upsert_members(
+        "G100", [{"user_id": "U7", "card": "GG", "nickname": "x"}]
+    )
+    await set_my_name(repo, user_id="U7", group_id="G100", name="狗哥")
+    text, _ = await rewrite_names(repo, group_id="G100", text="GG来了，aggg 不算")
+    assert text == "狗哥来了，aggg 不算"
+
+
+async def test_rewrite_without_group_is_noop(repo) -> None:
+    await set_my_name(repo, user_id="U7", group_id="G100", name="狗哥")
+    text, changes = await rewrite_names(repo, group_id=None, text="狗哥")
+    assert text == "狗哥"
+    assert changes == []

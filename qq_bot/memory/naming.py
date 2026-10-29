@@ -127,6 +127,93 @@ def _select_uid(
     return None, True
 
 
+def _name_pattern(needle: str) -> re.Pattern[str]:
+    """按名字构造匹配：短 ASCII 要求词边界，其余按原文。"""
+    if _is_short_ascii(normalize(needle)):
+        return re.compile(
+            rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", re.IGNORECASE
+        )
+    flags = re.IGNORECASE if needle.isascii() else 0
+    return re.compile(re.escape(needle), flags)
+
+
+def _rename_targets(rows: list[dict]) -> list[tuple[str, str]]:
+    """从称呼行里挑出「别名/显示名 → 该用户 preferred」的替换表。"""
+    owners: dict[str, set[str]] = {}
+    preferred: dict[str, set[str]] = {}
+    call: dict[str, str] = {}
+    alias_text: dict[str, str] = {}
+    for row in rows:
+        key = str(row["name_key"])
+        if len(key) < _MIN_RESOLVE_LEN:
+            continue
+        uid = str(row["user_id"])
+        owners.setdefault(key, set()).add(uid)
+        alias_text.setdefault(key, str(row["name"]))
+        if row["is_preferred"]:
+            preferred.setdefault(key, set()).add(uid)
+            call.setdefault(uid, str(row["name"]))
+
+    targets: list[tuple[str, str]] = []
+    for key, uids in owners.items():
+        if not (uids & set(call)):
+            continue  # 没人设过称呼，不动
+        chosen, ambiguous = _select_uid(uids, preferred.get(key, set()), set())
+        if ambiguous or chosen is None or chosen not in call:
+            continue
+        canonical = call[chosen]
+        if normalize(canonical) != key:
+            targets.append((alias_text[key], canonical))
+    return targets
+
+
+def _apply_replacements(text: str, replacements: list[tuple[int, int, str]]) -> str:
+    out: list[str] = []
+    cursor = 0
+    for start, end, canonical in sorted(replacements):
+        out.append(text[cursor:start])
+        out.append(canonical)
+        cursor = end
+    out.append(text[cursor:])
+    return "".join(out)
+
+
+async def rewrite_names(
+    repo: PgRepository,
+    *,
+    group_id: str | None,
+    text: str,
+) -> tuple[str, list[tuple[str, str]]]:
+    """把正文里出现的别名/显示名换成该用户显式设定的称呼。
+
+    只处理设过 `preferred`（用户明确说过「以后叫我 X」）的人；同名多人且没有
+    唯一 preferred 时跳过，避免误改。返回 (新文本, [(原词, 新称呼), ...])。
+    """
+    if not text or not group_id:
+        return text, []
+    rows = await repo.list_names(group_id)
+    targets = _rename_targets(rows) if rows else []
+    if not targets:
+        return text, []
+    targets.sort(key=lambda item: len(item[0]), reverse=True)
+
+    consumed = [False] * len(text)
+    replacements: list[tuple[int, int, str]] = []
+    changes: list[tuple[str, str]] = []
+    for alias, canonical in targets:
+        for match in _name_pattern(alias).finditer(text):
+            start, end = match.start(), match.end()
+            if any(consumed[start:end]):
+                continue
+            for index in range(start, end):
+                consumed[index] = True
+            replacements.append((start, end, canonical))
+            changes.append((alias, canonical))
+    if not replacements:
+        return text, []
+    return _apply_replacements(text, replacements), changes
+
+
 async def resolve_mentions(  # noqa: C901 —— 匹配规则集中在此，拆开反而难读
     repo: PgRepository,
     *,

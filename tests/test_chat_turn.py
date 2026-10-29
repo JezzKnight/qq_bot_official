@@ -304,3 +304,17 @@ async def test_no_auto_quote_when_trigger_is_latest(patched) -> None:  # noqa: A
         conversation.manager.reset()
     assert reply.quoted == []
     assert any(kind in ("text", "mention") for kind, _ in reply.sent)
+
+
+async def test_turn_rewrites_alias_to_preferred(patched, repo) -> None:
+    from qq_bot.memory.naming import set_my_name
+
+    group = "795245305"
+    await repo.upsert_members(
+        group, [{"user_id": "U7", "card": "张三", "nickname": "zs"}]
+    )
+    await set_my_name(repo, user_id="U7", group_id=group, name="狗哥")
+    patched.content = "叫张三来"
+    reply = FakeReply()
+    await turn_mod.run_turn(_incoming(reply, group=group), config=_config())
+    assert ("mention", "openid-12345|叫狗哥来") in reply.sent
