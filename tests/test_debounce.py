@@ -19,9 +19,9 @@ def cfg(**overrides: object) -> SimpleNamespace:
     base: dict[str, object] = {
         "group_presence_enabled": True,
         "group_presence_rate": 0.2,
-        "group_presence_window_sec": 600,
+        "group_presence_window_sec": 300,
         "group_presence_rate_in_window": 2.0,
-        "group_presence_active_grace_sec": 180,
+        "group_presence_active_grace_sec": 120,
         "group_presence_debounce_sec": DEBOUNCE,
         "group_presence_reply_cooldown_sec": 0,
         "group_presence_wake_cooldown_sec": 300,

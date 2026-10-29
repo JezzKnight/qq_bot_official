@@ -98,9 +98,9 @@ class PresenceConfig:
 
     enabled: bool = True
     rate: float = 0.2
-    window_sec: float = 600.0
+    window_sec: float = 300.0
     rate_in_window: float = 2.0
-    active_grace_sec: float = 180.0
+    active_grace_sec: float = 120.0
     debounce_sec: float = 8.0
     reply_cooldown_sec: float = 45.0
     wake_cooldown_sec: float = 300.0
@@ -267,7 +267,7 @@ class PresenceManager:
 
     # ── 关键词路径（名字出现）────────────────────────────────────────
 
-    def observe_keyword(  # noqa: C901, PLR0911, PLR0913
+    def observe_keyword(  # noqa: C901, PLR0911, PLR0912, PLR0913
         self,
         *,
         group_key: str,
@@ -294,8 +294,20 @@ class PresenceManager:
             self._remember(group, message_id)
             return self._skip_group(group_key, group, "homonym")
         if group.state is PresenceState.AWAKE:
-            # 窗口里再叫名字：不重复开窗，交回 0-1（上层 is force）正常判定。
+            # 窗口里再叫名字：把窗口重置回 WINDOW_SEC，交回 0-1（上层 is force）。
             # 这里不能记 message_id，否则 observe_active 会把它当重复消息跳过。
+            group.expires_at = max(group.expires_at, now + config.window_sec)
+            group.awake_since = now
+            if kind == "about":
+                group.hook_until = now + config.hook_sec
+                group.hook_used = False
+            logger.info(
+                "presence keyword renew group=%s by=%s kind=%s until=%.0f",
+                group_key,
+                user_key,
+                kind,
+                group.expires_at,
+            )
             return self._skip_group(group_key, group, "keyword_awake")
         self._remember(group, message_id)
         if group.daily_count >= config.daily_active:
@@ -772,9 +784,9 @@ def config_from(settings: Any) -> PresenceConfig:
     return PresenceConfig(
         enabled=bool(get("group_presence_enabled", True)),
         rate=float(get("group_presence_rate", 0.2)),
-        window_sec=float(get("group_presence_window_sec", 600)),
+        window_sec=float(get("group_presence_window_sec", 300)),
         rate_in_window=float(get("group_presence_rate_in_window", 2.0)),
-        active_grace_sec=float(get("group_presence_active_grace_sec", 180)),
+        active_grace_sec=float(get("group_presence_active_grace_sec", 120)),
         debounce_sec=float(get("group_presence_debounce_sec", 5)),
         reply_cooldown_sec=float(get("group_presence_reply_cooldown_sec", 45)),
         wake_cooldown_sec=float(get("group_presence_wake_cooldown_sec", 300)),

@@ -29,9 +29,9 @@ def cfg(**overrides: object) -> SimpleNamespace:
     base: dict[str, object] = {
         "group_presence_enabled": True,
         "group_presence_rate": 0.2,
-        "group_presence_window_sec": 600,
+        "group_presence_window_sec": 300,
         "group_presence_rate_in_window": 2.0,
-        "group_presence_active_grace_sec": 180,
+        "group_presence_active_grace_sec": 120,
         "group_presence_debounce_sec": 0,
         "group_presence_reply_cooldown_sec": 15,
         "group_presence_wake_cooldown_sec": 300,
@@ -103,7 +103,7 @@ def test_wake_sets_window_length(manager: PresenceManager) -> None:
     config = config_from(cfg(group_presence_rate=1))
     manager.observe_active(event(), config=config, now=100.0, roll=0.0)
     group = manager._groups["g1"]
-    assert group.expires_at == 700.0
+    assert group.expires_at == 400.0
 
 
 def test_awake_sleeps_when_user_mentions_other(
@@ -155,7 +155,7 @@ def test_window_timeout_closes_then_wake_cooldown(manager: PresenceManager) -> N
     manager.observe_active(event(), config=config, now=0.0, roll=0.0)
     decision = manager.observe_active(event(), config=config, now=601.0, roll=0.0)
     assert decision.reason == "window_timeout"
-    assert manager.state_of("g1", now=601.0) is PresenceState.SLEEPING
+    assert manager.state_of("g1", now=301.0) is PresenceState.SLEEPING
     # 关窗后 300 秒内不能重新中奖
     decision = manager.observe_active(event(), config=config, now=700.0, roll=0.0)
     assert decision.reason == "cooldown"
@@ -701,8 +701,8 @@ def test_observe_keyword_call_opens_awake_window(manager: PresenceManager) -> No
         roll=0.99,
     )
     assert nxt.reason == "rate"
-    assert manager.state_of("g1", now=599.0) is PresenceState.AWAKE
-    assert manager.state_of("g1", now=601.0) is PresenceState.SLEEPING
+    assert manager.state_of("g1", now=299.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=301.0) is PresenceState.SLEEPING
 
 
 def test_observe_keyword_about_sets_hook(manager: PresenceManager) -> None:
@@ -1228,16 +1228,16 @@ def test_passive_at_opens_window(manager: PresenceManager) -> None:
     decision = manager.open_window("g1", config=config, now=0.0)
     assert decision.action is Action.WAKE
     assert manager.state_of("g1", now=0.0) is PresenceState.AWAKE
-    assert manager.state_of("g1", now=599.0) is PresenceState.AWAKE
-    assert manager.state_of("g1", now=601.0) is PresenceState.SLEEPING
+    assert manager.state_of("g1", now=299.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=301.0) is PresenceState.SLEEPING
 
 
 def test_passive_at_refreshes_window(manager: PresenceManager) -> None:
     config = config_from(cfg())
     manager.open_window("g1", config=config, now=0.0)
     manager.open_window("g1", config=config, now=100.0)
-    assert manager.state_of("g1", now=699.0) is PresenceState.AWAKE
-    assert manager.state_of("g1", now=701.0) is PresenceState.SLEEPING
+    assert manager.state_of("g1", now=399.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=401.0) is PresenceState.SLEEPING
 
 
 def test_passive_at_opens_window_after_unmute(manager: PresenceManager) -> None:
@@ -1293,15 +1293,15 @@ def test_passive_at_resets_pass_count(manager: PresenceManager) -> None:
     assert manager.state_of("g1", now=10.0) is PresenceState.AWAKE
 
 
-def test_active_grace_covers_first_three_minutes(manager: PresenceManager) -> None:
+def test_active_grace_covers_first_two_minutes(manager: PresenceManager) -> None:
     config = config_from(cfg(group_presence_rate=0.0))
     decision = manager.open_window("g1", config=config, now=100.0)
     assert decision.action is Action.WAKE
     assert manager.in_active_grace("g1", config=config, now=100.0)
-    assert manager.in_active_grace("g1", config=config, now=279.9)
-    assert not manager.in_active_grace("g1", config=config, now=280.0)
-    manager._close("g1", manager._groups["g1"], "test", config, 281.0)
-    assert not manager.in_active_grace("g1", config=config, now=281.0)
+    assert manager.in_active_grace("g1", config=config, now=219.9)
+    assert not manager.in_active_grace("g1", config=config, now=220.0)
+    manager._close("g1", manager._groups["g1"], "test", config, 221.0)
+    assert not manager.in_active_grace("g1", config=config, now=221.0)
 
 
 @pytest.mark.asyncio
@@ -1445,3 +1445,69 @@ async def test_active_grace_honors_explicit_mute(monkeypatch) -> None:
     assert ok is False
     assert sent == []
     assert presence.manager.state_of("g1", now=10.0) is PresenceState.MUTED
+
+
+def test_default_window_is_five_minutes_and_grace_two() -> None:
+    config = presence.PresenceConfig()
+    assert config.window_sec == 300.0
+    assert config.active_grace_sec == 120.0
+
+
+def test_keyword_call_renews_awake_window(manager: PresenceManager) -> None:
+    config = keyword_config()
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config,
+        now=0.0,
+    )
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k2",
+        config=config,
+        now=200.0,
+    )
+    # 窗口从 200 重新算 300 秒
+    assert manager.state_of("g1", now=499.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=501.0) is PresenceState.SLEEPING
+
+
+def test_keyword_about_renews_awake_window(manager: PresenceManager) -> None:
+    config = keyword_config()
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="about",
+        message_id="k1",
+        config=config,
+        now=0.0,
+    )
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u2",
+        kind="about",
+        message_id="k2",
+        config=config,
+        now=200.0,
+    )
+    assert manager.state_of("g1", now=499.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=501.0) is PresenceState.SLEEPING
+
+
+def test_passive_at_renews_keyword_window(manager: PresenceManager) -> None:
+    config = keyword_config()
+    manager.observe_keyword(
+        group_key="g1",
+        user_key="u1",
+        kind="call",
+        message_id="k1",
+        config=config,
+        now=0.0,
+    )
+    manager.open_window("g1", config=config, now=200.0, reason="passive")
+    assert manager.state_of("g1", now=499.0) is PresenceState.AWAKE
+    assert manager.state_of("g1", now=501.0) is PresenceState.SLEEPING

@@ -34,7 +34,7 @@ class AiChatConfig(BaseModel):
     # 设计见 docs/spec/群聊存在感.md；决策在 qq_bot/chat/presence.py。
     group_presence_enabled: bool = True  # 总开关；关掉后只落库，不接话
     group_presence_rate: float = 0.2  # 每条可接消息的抽奖概率（0-1）
-    group_presence_window_sec: int = 600  # 中奖后在场窗口：10 分钟
+    group_presence_window_sec: int = 300  # 中奖后在场窗口：10 分钟
     group_presence_rate_in_window: float = 2.0  # 窗口内倍率：p = rate x 本值
     group_presence_active_grace_sec: int = 180  # 唤醒后前 N 秒不参与策略，全接
     group_presence_debounce_sec: float = 8.0  # AWAKE 下等 N 秒无新消息再回
