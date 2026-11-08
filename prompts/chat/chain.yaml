@@ -1,7 +1,8 @@
-# chat 系统提示词链路 v12（QQ 专用，大肥鱼人设）
+# chat 系统提示词链路 v13（QQ 专用，大肥鱼人设）
 # v9 起所有系统提示词模块合并进 chat/system.md，一个文件从头读到尾；
 # group.md（群聊身份规则）与 keyword_transition.md（过渡句模板）是独立调用，不在此链路内。
 # modules 的顺序就是拼接顺序；条目格式为 name.version，name 对应 chat/{name}.md。
-version: 12
+# v13：新增「什么时候必须先查」，明确时效/事实类问题先检索再答，并修掉鼓励直接说"不知道"的旧句。
+version: 13
 modules:
-  - system.v1
+  - system.v2

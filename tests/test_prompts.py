@@ -15,6 +15,7 @@ SYSTEM_FILE = CHAT_DIR / "system.md"
 HEADS = [
     "# 大肥鱼",
     "# 群聊里的相处方式",
+    "# 什么时候必须先查",
     "# 不确定的时候",
     "# QQ 群聊限制",
     "# 图片和表情包",
@@ -23,9 +24,9 @@ HEADS = [
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 12
+    assert prompt_service.chain_version == 13
     assert [ref.name for ref in prompt_service.modules] == ["system"]
-    assert prompt_service.modules[0].version == "v1"
+    assert prompt_service.modules[0].version == "v2"
 
 
 def test_system_prompt_is_one_file_in_order() -> None:
