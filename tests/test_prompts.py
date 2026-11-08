@@ -24,15 +24,23 @@ HEADS = [
 
 
 def test_chain_version() -> None:
-    assert prompt_service.chain_version == 13
+    assert prompt_service.chain_version == 14
     assert [ref.name for ref in prompt_service.modules] == ["system"]
-    assert prompt_service.modules[0].version == "v2"
+    assert prompt_service.modules[0].version == "v3"
 
 
 def test_system_prompt_is_one_file_in_order() -> None:
     text = prompt_service.get_system_prompt()
     positions = [text.index(head) for head in HEADS]
     assert positions == sorted(positions)
+
+
+def test_system_prompt_has_no_fish_cliche_examples() -> None:
+    """鱼八股一节要判据，且不能再把「行 我认」当成正面示范写进认错话术。"""
+    text = prompt_service.get_system_prompt()
+    assert "# 鱼八股" in text
+    assert "认账腔" in text and "点评腔" in text and "判决腔" in text
+    assert "“行 我认”“你说得对”“我闭嘴”" not in text
 
 
 def test_group_prompt_is_separate() -> None:
